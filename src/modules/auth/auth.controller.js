@@ -1,0 +1,117 @@
+import { AuthService } from './auth.service.js';
+import { AuthRepository } from './auth.repository.js';
+import { UserRepository } from '../users/users.repository.js';
+import { UnauthorizedError } from '../../core/errors/domain.errors.js';
+import { AUTH_ERRORS } from '../../core/errors/error.codes.js';
+
+const userRepository = new UserRepository();
+const authRepository = new AuthRepository();
+// Exported for testing interception
+export const authService = new AuthService(userRepository, authRepository);
+
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict',
+  maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+};
+
+export const register = async (req, res, next) => {
+  try {
+    const user = await authService.register(req.body);
+    res.status(201).json({ success: true, data: user });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const login = async (req, res, next) => {
+  try {
+    const { astuEmail, password } = req.body;
+    const { accessToken, refreshToken, user } = await authService.login(astuEmail, password);
+
+    res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS);
+
+    res.status(200).json({
+      success: true,
+      data: { accessToken, user }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const refresh = async (req, res, next) => {
+  try {
+    const token = req.cookies?.refreshToken;
+    if (!token) throw new UnauthorizedError(AUTH_ERRORS.UNAUTHORIZED);
+
+    const { accessToken, refreshToken } = await authService.refreshAccess(token);
+
+    res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS);
+
+    res.status(200).json({
+      success: true,
+      data: { accessToken }
+    });
+  } catch (error) {
+    // Clear cookie if refresh fails (e.g., revoked or expired)
+    res.clearCookie('refreshToken', { ...COOKIE_OPTIONS, maxAge: 0 });
+    next(error);
+  }
+};
+
+export const logout = async (req, res, next) => {
+  try {
+    const token = req.cookies?.refreshToken;
+    if (token) {
+      await authService.logout(token);
+    }
+
+    res.clearCookie('refreshToken', { ...COOKIE_OPTIONS, maxAge: 0 });
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyEmail = async (req, res, next) => {
+  try {
+    const { astuEmail, otp } = req.body;
+    await authService.verifyEmail(astuEmail, otp);
+    res.status(200).json({ success: true, message: 'Email verified successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const forgotPassword = async (req, res, next) => {
+  try {
+    const { astuEmail } = req.body;
+    await authService.forgotPassword(astuEmail);
+    res.status(200).json({ success: true, message: 'If the email exists, an OTP has been sent.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resetPassword = async (req, res, next) => {
+  try {
+    const { astuEmail, otp, newPassword } = req.body;
+    await authService.resetPassword(astuEmail, otp, newPassword);
+    res.status(200).json({ success: true, message: 'Password reset successfully. Please login again.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+export const resendVerification = async (req, res, next) => {
+  try {
+    const { astuEmail } = req.body;
+    await authService.resendVerificationEmail(astuEmail);
+    res.status(200).json({ success: true, message: 'If the account exists and is unverified, a new OTP has been sent.' });
+  } catch (error) {
+    next(error);
+  }
+};
