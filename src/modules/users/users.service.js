@@ -161,6 +161,10 @@ export class UserService {
       throw new NotFoundError('Restaurant not found.');
     }
 
+    if (restaurant.mode === 'ADMIN_MANAGED') {
+      throw new BusinessLogicError('Cannot assign Vendor Staff to an ADMIN_MANAGED restaurant.');
+    }
+
     await this.userRepository.assignVendorStaff(targetUserId, restaurantId, isOwner);
   }
 

@@ -235,16 +235,20 @@ model DelivererProfile {
 model Restaurant {
   id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String
-  phone     String
-  // ownerId   String     @unique @db.Uuid
-  // owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  phone     String     @unique // Added from PRD
   mode      VendorMode @default(VENDOR_MANAGED) // Added from PRD
   location  String
   lat       Float
   lng       Float
   isOpen    Boolean    @default(false)
-  operatingHours String?    // e.g., "Mon-Fri 9am-9pm; Sat-Sun 10am-8pm"
+  isActive  Boolean    @default(true) 
+  openingTime  String?    // Format: "HH:mm" (e.g., "08:00")
+  closingTime  String?     // Format: "HH:mm" (e.g., "20:00")
   imageUrl  String?
+  minOrderValue Decimal    @default(0.00) @db.Decimal(10, 2)
+  avgRating     Decimal    @default(5.00) @db.Decimal(3, 2)
+  totalReviews  Int        @default(0)
+  tags         String[]   @default([]) // e.g., ["Traditional", "Juice", "Cafe"]
   
   // Relations
   staff      VendorProfile[]
@@ -253,7 +257,8 @@ model Restaurant {
   orders     Order[]
 
   @@index([lat, lng])
-  @@index([isOpen])
+  @@index([isOpen, isActive])
+  @@index([tags], type: Gin)
 }
 
 model VendorProfile {
@@ -274,6 +279,7 @@ model Category {
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   name         String
   sortOrder    Int        @default(0)
+  isArchived   Boolean    @default(false)
   
   // Relations
   products     MenuItem[]
@@ -292,7 +298,10 @@ model MenuItem {
   price        Decimal    @db.Decimal(10, 2)
   imageUrl     String?
   isAvailable  Boolean    @default(true)
+  isArchived   Boolean    @default(false)
   prepTimeMins Int        @default(15)
+  isFasting    Boolean    @default(false)
+  availabilityReason String? // e.g., "Sold out", "Out of season"
   
   // Relations
   orderItems   OrderItem[]

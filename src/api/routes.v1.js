@@ -1,6 +1,12 @@
 import express from 'express';
 import authRoutes from '../modules/auth/auth.routes.js';
 import userRoutes from '../modules/users/users.routes.js';
+import restaurantRoutes from '../modules/restaurants/restaurant.routes.js';
+import menuRoutes from '../modules/menus/menu.routes.js';
+import * as menuController from '../modules/menus/menu.controller.js';
+import { validate } from '../api/middlewares/validate.middleware.js';
+import { queryMenuItemsSchema } from '../modules/menus/menu.dto.js';
+import { protect } from '../api/middlewares/auth.middleware.js';
 
 
 const router = express.Router();
@@ -13,21 +19,18 @@ router.get('/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-router.get('/test', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'ASTU Eats API is running smoothly.',
-    timestamp: new Date().toISOString()
-  });
-});
-
-
 
 router.use('/users', userRoutes);
 router.use('/auth', authRoutes);
+router.use('/restaurants', restaurantRoutes);
+router.use('/restaurants/:restaurantId/menus', menuRoutes);
 
-// router.use('/api/users', userRoutes);
-// router.use('/api/auth', authRoutes);
-// router.use('/api/restaurants', restaurantRoutes);
+// Global menu search endpoint (no restaurantId in path)
+router.get(
+  '/discovery/search', 
+  protect, 
+  validate(queryMenuItemsSchema), 
+  menuController.globalSearch
+);
 
 export default router;

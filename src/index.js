@@ -1,6 +1,6 @@
-BigInt.prototype.toJSON = function() {
-  return this.toString();
-};
+// BigInt.prototype.toJSON = function() {
+//   return this.toString();
+// };
 
 import { createServer } from 'node:http';
 import { app } from './api/server.js';

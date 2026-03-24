@@ -2,7 +2,10 @@
 CREATE TYPE "VerificationStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
 
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('STUDENT', 'VENDOR_STAFF', 'ADMIN');
+CREATE TYPE "TokenType" AS ENUM ('EMAIL_VERIFICATION', 'PASSWORD_RESET');
+
+-- CreateEnum
+CREATE TYPE "UserRole" AS ENUM ('CUSTOMER', 'DELIVERER', 'VENDOR_STAFF', 'ADMIN');
 
 -- CreateEnum
 CREATE TYPE "ActiveMode" AS ENUM ('CUSTOMER', 'DELIVERER');
@@ -35,14 +38,17 @@ CREATE TABLE "User" (
     "astuEmail" TEXT NOT NULL,
     "fullName" TEXT NOT NULL,
     "phoneNumber" TEXT NOT NULL,
-    "email" TEXT,
     "password" TEXT NOT NULL,
     "gender" TEXT,
     "avatarUrl" TEXT,
     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
     "isEmailVerified" BOOLEAN NOT NULL DEFAULT false,
-    "role" "UserRole" NOT NULL DEFAULT 'STUDENT',
+    "role" "UserRole" NOT NULL DEFAULT 'CUSTOMER',
     "activeMode" "ActiveMode" NOT NULL DEFAULT 'CUSTOMER',
+    "lastActiveAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deviceToken" TEXT,
+    "failedLoginAttempts" INTEGER NOT NULL DEFAULT 0,
+    "lockedUntil" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -50,11 +56,53 @@ CREATE TABLE "User" (
 );
 
 -- CreateTable
+CREATE TABLE "RefreshToken" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "token" TEXT NOT NULL,
+    "userId" UUID NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "isRevoked" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RefreshToken_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "VerificationToken" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "userId" UUID NOT NULL,
+    "tokenHash" TEXT NOT NULL,
+    "type" "TokenType" NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "VerificationToken_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "UserAuditLog" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "targetUserId" UUID NOT NULL,
+    "actorId" UUID NOT NULL,
+    "action" TEXT NOT NULL,
+    "previousValue" TEXT,
+    "newValue" TEXT,
+    "reason" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "UserAuditLog_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "CustomerProfile" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "userId" UUID NOT NULL,
-    "defaultDormBlock" TEXT,
+    "defaultLocation" TEXT,
     "rating" DECIMAL(3,2) NOT NULL DEFAULT 5.0,
+    "totalOrders" INTEGER NOT NULL DEFAULT 0,
+    "prefferedPaymentMethod" TEXT,
+    "bookmarkRestaurants" TEXT[],
+    "bookmarkMeals" TEXT[],
 
     CONSTRAINT "CustomerProfile_pkey" PRIMARY KEY ("id")
 );
@@ -65,11 +113,14 @@ CREATE TABLE "DelivererProfile" (
     "userId" UUID NOT NULL,
     "isVerified" BOOLEAN NOT NULL DEFAULT false,
     "verificationStatus" "VerificationStatus" NOT NULL DEFAULT 'PENDING',
-    "idCardUrl" TEXT,
+    "isOnline" BOOLEAN NOT NULL DEFAULT false,
+    "currentLocation" TEXT,
     "rating" DECIMAL(3,2) NOT NULL DEFAULT 5.0,
     "isAvailable" BOOLEAN NOT NULL DEFAULT false,
     "payoutAccount" TEXT,
     "payoutProvider" TEXT,
+    "totalDeliveries" INTEGER NOT NULL DEFAULT 0,
+    "totalEarnings" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
 
     CONSTRAINT "DelivererProfile_pkey" PRIMARY KEY ("id")
 );
@@ -78,12 +129,20 @@ CREATE TABLE "DelivererProfile" (
 CREATE TABLE "Restaurant" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "name" TEXT NOT NULL,
+    "phone" TEXT NOT NULL,
     "mode" "VendorMode" NOT NULL DEFAULT 'VENDOR_MANAGED',
     "location" TEXT NOT NULL,
     "lat" DOUBLE PRECISION NOT NULL,
     "lng" DOUBLE PRECISION NOT NULL,
     "isOpen" BOOLEAN NOT NULL DEFAULT false,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "openingTime" TEXT,
+    "closingTime" TEXT,
     "imageUrl" TEXT,
+    "minOrderValue" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    "avgRating" DECIMAL(3,2) NOT NULL DEFAULT 5.00,
+    "totalReviews" INTEGER NOT NULL DEFAULT 0,
+    "tags" TEXT[] DEFAULT ARRAY[]::TEXT[],
 
     CONSTRAINT "Restaurant_pkey" PRIMARY KEY ("id")
 );
@@ -104,6 +163,7 @@ CREATE TABLE "Category" (
     "restaurantId" UUID NOT NULL,
     "name" TEXT NOT NULL,
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "isArchived" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "Category_pkey" PRIMARY KEY ("id")
 );
@@ -118,7 +178,10 @@ CREATE TABLE "MenuItem" (
     "price" DECIMAL(10,2) NOT NULL,
     "imageUrl" TEXT,
     "isAvailable" BOOLEAN NOT NULL DEFAULT true,
+    "isArchived" BOOLEAN NOT NULL DEFAULT false,
     "prepTimeMins" INTEGER NOT NULL DEFAULT 15,
+    "isFasting" BOOLEAN NOT NULL DEFAULT false,
+    "availabilityReason" TEXT,
 
     CONSTRAINT "MenuItem_pkey" PRIMARY KEY ("id")
 );
@@ -130,18 +193,18 @@ CREATE TABLE "Order" (
     "customerId" UUID NOT NULL,
     "delivererId" UUID,
     "restaurantId" UUID NOT NULL,
+    "estimatedDeliveryTime" TIMESTAMP(3),
     "foodPrice" DECIMAL(10,2) NOT NULL,
     "deliveryFee" DECIMAL(10,2) NOT NULL,
     "transactionFee" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     "serviceFee" DECIMAL(10,2) NOT NULL,
     "tip" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     "totalAmount" DECIMAL(10,2) NOT NULL,
-    "payoutAmount" DECIMAL(10,2) NOT NULL,
     "status" "OrderStatus" NOT NULL DEFAULT 'CREATED',
     "paymentStatus" "PaymentStatus" NOT NULL DEFAULT 'AWAITING_PAYMENT',
     "otpCode" TEXT NOT NULL,
+    "otpVerifiedAt" TIMESTAMP(3),
     "chapaRef" TEXT,
-    "payoutRef" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -172,26 +235,50 @@ CREATE TABLE "OrderStatusHistory" (
 );
 
 -- CreateTable
-CREATE TABLE "PayoutLog" (
+CREATE TABLE "Payment" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "orderId" UUID NOT NULL,
-    "status" TEXT NOT NULL,
+    "transactionId" TEXT,
+    "provider" TEXT,
+    "status" "PaymentStatus" NOT NULL DEFAULT 'AWAITING_PAYMENT',
     "apiResponse" TEXT,
+    "amount" DECIMAL(10,2) NOT NULL,
+    "deliveryFee" DECIMAL(10,2) NOT NULL,
+    "serviceFee" DECIMAL(10,2) NOT NULL,
+    "tip" DECIMAL(10,2) NOT NULL,
+    "refundReason" TEXT,
+    "webhookReceivedAt" TIMESTAMP(3),
+    "payoutAmount" DECIMAL(10,2) NOT NULL,
     "attempts" INTEGER NOT NULL DEFAULT 1,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "PayoutLog_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "Payment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "Review" (
+CREATE TABLE "Rating" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "raterId" UUID NOT NULL,
+    "rateeId" UUID NOT NULL,
     "orderId" UUID NOT NULL,
     "rating" INTEGER NOT NULL,
     "comment" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "Review_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "Rating_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Notification" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "userId" UUID NOT NULL,
+    "title" TEXT NOT NULL,
+    "message" TEXT NOT NULL,
+    "sentAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "delivered" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Notification_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -202,6 +289,7 @@ CREATE TABLE "LedgerEntry" (
     "amount" DECIMAL(10,2) NOT NULL,
     "type" "LedgerTransactionType" NOT NULL,
     "status" "LedgerEntryStatus" NOT NULL DEFAULT 'PENDING',
+    "description" TEXT,
     "reference" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -215,6 +303,7 @@ CREATE TABLE "Dispute" (
     "raisedById" UUID NOT NULL,
     "assignedAdminId" UUID,
     "reason" TEXT NOT NULL,
+    "evidence" TEXT,
     "status" "DisputeStatus" NOT NULL DEFAULT 'OPEN',
     "resolution" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -234,6 +323,17 @@ CREATE TABLE "DispatchLog" (
     CONSTRAINT "DispatchLog_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "SystemConfig" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "key" TEXT NOT NULL,
+    "value" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "SystemConfig_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "User_telegramId_key" ON "User"("telegramId");
 
@@ -242,9 +342,6 @@ CREATE UNIQUE INDEX "User_astuEmail_key" ON "User"("astuEmail");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_phoneNumber_key" ON "User"("phoneNumber");
-
--- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
 CREATE INDEX "User_astuEmail_idx" ON "User"("astuEmail");
@@ -256,31 +353,100 @@ CREATE INDEX "User_telegramId_idx" ON "User"("telegramId");
 CREATE INDEX "User_role_status_idx" ON "User"("role", "status");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "RefreshToken_token_key" ON "RefreshToken"("token");
+
+-- CreateIndex
+CREATE INDEX "RefreshToken_userId_idx" ON "RefreshToken"("userId");
+
+-- CreateIndex
+CREATE INDEX "RefreshToken_token_idx" ON "RefreshToken"("token");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "VerificationToken_tokenHash_key" ON "VerificationToken"("tokenHash");
+
+-- CreateIndex
+CREATE INDEX "VerificationToken_userId_type_idx" ON "VerificationToken"("userId", "type");
+
+-- CreateIndex
+CREATE INDEX "UserAuditLog_targetUserId_idx" ON "UserAuditLog"("targetUserId");
+
+-- CreateIndex
+CREATE INDEX "UserAuditLog_actorId_idx" ON "UserAuditLog"("actorId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "CustomerProfile_userId_key" ON "CustomerProfile"("userId");
+
+-- CreateIndex
+CREATE INDEX "CustomerProfile_defaultLocation_idx" ON "CustomerProfile"("defaultLocation");
+
+-- CreateIndex
+CREATE INDEX "CustomerProfile_rating_idx" ON "CustomerProfile"("rating");
+
+-- CreateIndex
+CREATE INDEX "CustomerProfile_totalOrders_idx" ON "CustomerProfile"("totalOrders");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "DelivererProfile_userId_key" ON "DelivererProfile"("userId");
 
 -- CreateIndex
+CREATE INDEX "DelivererProfile_isVerified_idx" ON "DelivererProfile"("isVerified");
+
+-- CreateIndex
+CREATE INDEX "DelivererProfile_userId_isOnline_idx" ON "DelivererProfile"("userId", "isOnline");
+
+-- CreateIndex
+CREATE INDEX "DelivererProfile_rating_idx" ON "DelivererProfile"("rating");
+
+-- CreateIndex
+CREATE INDEX "DelivererProfile_isAvailable_idx" ON "DelivererProfile"("isAvailable");
+
+-- CreateIndex
+CREATE INDEX "DelivererProfile_totalDeliveries_idx" ON "DelivererProfile"("totalDeliveries");
+
+-- CreateIndex
+CREATE INDEX "DelivererProfile_totalEarnings_idx" ON "DelivererProfile"("totalEarnings");
+
+-- CreateIndex
 CREATE INDEX "Restaurant_lat_lng_idx" ON "Restaurant"("lat", "lng");
 
 -- CreateIndex
-CREATE INDEX "Restaurant_isOpen_idx" ON "Restaurant"("isOpen");
+CREATE INDEX "Restaurant_isOpen_isActive_idx" ON "Restaurant"("isOpen", "isActive");
+
+-- CreateIndex
+CREATE INDEX "Restaurant_tags_idx" ON "Restaurant" USING GIN ("tags");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "VendorProfile_userId_key" ON "VendorProfile"("userId");
 
 -- CreateIndex
+CREATE INDEX "VendorProfile_restaurantId_idx" ON "VendorProfile"("restaurantId");
+
+-- CreateIndex
+CREATE INDEX "Category_restaurantId_idx" ON "Category"("restaurantId");
+
+-- CreateIndex
 CREATE INDEX "MenuItem_restaurantId_idx" ON "MenuItem"("restaurantId");
+
+-- CreateIndex
+CREATE INDEX "MenuItem_categoryId_idx" ON "MenuItem"("categoryId");
+
+-- CreateIndex
+CREATE INDEX "MenuItem_price_idx" ON "MenuItem"("price");
+
+-- CreateIndex
+CREATE INDEX "MenuItem_isAvailable_idx" ON "MenuItem"("isAvailable");
+
+-- CreateIndex
+CREATE INDEX "MenuItem_prepTimeMins_idx" ON "MenuItem"("prepTimeMins");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Order_shortId_key" ON "Order"("shortId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Order_chapaRef_key" ON "Order"("chapaRef");
+CREATE UNIQUE INDEX "Order_otpCode_key" ON "Order"("otpCode");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Order_payoutRef_key" ON "Order"("payoutRef");
+CREATE UNIQUE INDEX "Order_chapaRef_key" ON "Order"("chapaRef");
 
 -- CreateIndex
 CREATE INDEX "Order_status_idx" ON "Order"("status");
@@ -289,13 +455,34 @@ CREATE INDEX "Order_status_idx" ON "Order"("status");
 CREATE INDEX "Order_customerId_idx" ON "Order"("customerId");
 
 -- CreateIndex
+CREATE INDEX "Order_restaurantId_idx" ON "Order"("restaurantId");
+
+-- CreateIndex
 CREATE INDEX "Order_delivererId_idx" ON "Order"("delivererId");
 
 -- CreateIndex
 CREATE INDEX "Order_createdAt_idx" ON "Order"("createdAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Review_orderId_key" ON "Review"("orderId");
+CREATE INDEX "OrderStatusHistory_orderId_idx" ON "OrderStatusHistory"("orderId");
+
+-- CreateIndex
+CREATE INDEX "OrderStatusHistory_changedById_idx" ON "OrderStatusHistory"("changedById");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Payment_orderId_key" ON "Payment"("orderId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Payment_transactionId_key" ON "Payment"("transactionId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Rating_orderId_key" ON "Rating"("orderId");
+
+-- CreateIndex
+CREATE INDEX "Notification_userId_idx" ON "Notification"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "LedgerEntry_reference_key" ON "LedgerEntry"("reference");
 
 -- CreateIndex
 CREATE INDEX "LedgerEntry_orderId_idx" ON "LedgerEntry"("orderId");
@@ -317,6 +504,21 @@ CREATE INDEX "DispatchLog_orderId_idx" ON "DispatchLog"("orderId");
 
 -- CreateIndex
 CREATE INDEX "DispatchLog_delivererId_idx" ON "DispatchLog"("delivererId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SystemConfig_key_key" ON "SystemConfig"("key");
+
+-- AddForeignKey
+ALTER TABLE "RefreshToken" ADD CONSTRAINT "RefreshToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "VerificationToken" ADD CONSTRAINT "VerificationToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserAuditLog" ADD CONSTRAINT "UserAuditLog_targetUserId_fkey" FOREIGN KEY ("targetUserId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserAuditLog" ADD CONSTRAINT "UserAuditLog_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "CustomerProfile" ADD CONSTRAINT "CustomerProfile_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -361,7 +563,19 @@ ALTER TABLE "OrderStatusHistory" ADD CONSTRAINT "OrderStatusHistory_orderId_fkey
 ALTER TABLE "OrderStatusHistory" ADD CONSTRAINT "OrderStatusHistory_changedById_fkey" FOREIGN KEY ("changedById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Review" ADD CONSTRAINT "Review_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Payment" ADD CONSTRAINT "Payment_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Rating" ADD CONSTRAINT "Rating_raterId_fkey" FOREIGN KEY ("raterId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Rating" ADD CONSTRAINT "Rating_rateeId_fkey" FOREIGN KEY ("rateeId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Rating" ADD CONSTRAINT "Rating_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "LedgerEntry" ADD CONSTRAINT "LedgerEntry_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

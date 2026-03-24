@@ -9,6 +9,10 @@ import v1Routes from './routes.v1.js';
 import { globalErrorHandler } from './middlewares/error.middleware.js';
 import { NotFoundError } from '../core/errors/domain.errors.js';
 
+BigInt.prototype.toJSON = function() {
+  return this.toString();
+};
+
 const app = express();
 
 // 1. Security & Utility Middlewares

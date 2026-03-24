@@ -1,6 +1,7 @@
 import prisma from '../../infrastructure/database/prisma.client.js';
 
 export class AuthRepository {
+
   async storeRefreshToken(userId, token, expiresInDays = 7) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + expiresInDays);
@@ -60,7 +61,7 @@ export class AuthRepository {
     return await prisma.verificationToken.delete({ where: { id } });
   }
 
-   async incrementFailedLogin(userId, currentAttempts) {
+  async incrementFailedLogin(userId, currentAttempts) {
     const attempts = currentAttempts + 1;
     const updateData = { failedLoginAttempts: attempts };
 

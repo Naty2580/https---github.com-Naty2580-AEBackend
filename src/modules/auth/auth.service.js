@@ -35,12 +35,20 @@ export class AuthService {
           phoneNumber: data.phoneNumber,
           password: hashedPassword,
           gender: data.gender,
+          role: data.role || 'CUSTOMER',
           isEmailVerified: false
         }
       });
 
 
+      if (newUser.role === 'CUSTOMER') {
       await tx.customerProfile.create({ data: { userId: newUser.id } });
+      } else if (newUser.role === 'VENDOR_STAFF') {
+        await tx.vendorProfile.create({ data: { userId: newUser.id } });
+      } else if (newUser.role === 'DELIVERER') {
+        await tx.delivererProfile.create({ 
+          data: {  userId: newUser.id} });
+      }
 
       this._generateAndSendOTP(newUser, 'EMAIL_VERIFICATION', 'Account Verification').catch(console.error);
 
@@ -185,11 +193,11 @@ export class AuthService {
 
   async resendVerificationEmail(astuEmail) {
     const user = await this.userRepository.findByEmail(astuEmail);
-    
+
     if (!user) {
       return; // Silent success to prevent email enumeration
     }
-    
+
     if (user.isEmailVerified) {
       throw new BusinessLogicError('Account is already verified.');
     }

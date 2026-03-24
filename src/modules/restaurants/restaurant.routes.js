@@ -1,64 +1,65 @@
-// import express from 'express';
-// import * as restaurantController from './restaurants.controller.js';
-// import { protect } from '../../middlewares/authMiddleware.js';
-// import { authorize } from '../../middlewares/roleMiddleware.js';
-// import { validate } from '../../middlewares/validate.js';
-// import { 
-//   createRestaurantSchema, 
-//   createCategorySchema, 
-//   createProductSchema 
-// } from './restaurants.schema.js';
-
-// const router = express.Router();
-
-// // PUBLIC ROUTES
-// router.get('/', restaurantController.getRestaurants);
-// router.get('/:id/menu', restaurantController.getMenu);
-
-// // ADMIN ONLY: Create Restaurant
-// router.post('/', 
-//   protect, 
-//   authorize('ADMIN'), 
-//   validate(createRestaurantSchema), 
-//   restaurantController.createRestaurant
-// );
-
-// // VENDOR/ADMIN: Manage Menu
-// router.post('/:restaurantId/categories', 
-//   protect, 
-//   authorize('VENDOR', 'ADMIN'), 
-//   validate(createCategorySchema), 
-//   restaurantController.createCategory
-// );
-
-// router.post('/:restaurantId/products', 
-//   protect, 
-//   authorize('VENDOR', 'ADMIN'), 
-//   validate(createProductSchema), 
-//   restaurantController.createProduct
-// );
-
-// export default router;
-
 import { Router } from 'express';
 import { protect } from '../../api/middlewares/auth.middleware.js';
 import { restrictTo } from '../../api/middlewares/rbac.middleware.js';
 import { validate } from '../../api/middlewares/validate.middleware.js';
-import { createRestaurantSchema } from './restaurant.dto.js';
+import {
+  createRestaurantSchema, updateRestaurantSchema,
+  queryRestaurantSchema, toggleStatusSchema
+} from './restaurant.dto.js';
+import { createCategorySchema, updateCategorySchema, deleteCategorySchema, } from '../menus/categories.dto.js';
 import * as controller from './restaurant.controller.js';
+import * as categoryController from '../menus/categories.controller.js';
 
 const router = Router();
 
-router.post('/', 
-  protect, 
+router.use(protect);
+
+router.get('/', validate(queryRestaurantSchema), controller.list);
+router.get('/:id', controller.getDetails);
+
+router.post('/',
   restrictTo('ADMIN'), // Only Admins can register new restaurants
-  validate(createRestaurantSchema), 
+  validate(createRestaurantSchema),
   controller.create
 );
-router.patch('/:id/status', protect, restrictTo('VENDOR_STAFF', 'ADMIN'), controller.updateStatus);
-router.patch('/:id', protect, restrictTo('VENDOR_STAFF', 'ADMIN'), controller.update);
+router.delete(
+  '/:id',
+  restrictTo('ADMIN'),
+  controller.decommission
+);
 
-router.get('/', controller.getAll);
-router.get('/:id', controller.getDetails);
+
+router.patch(
+  '/:id/status', 
+  restrictTo('VENDOR_STAFF', 'ADMIN'), 
+  validate(toggleStatusSchema), 
+  controller.updateStatus
+);
+router.patch('/:id', restrictTo('ADMIN', 'VENDOR_STAFF'), validate(updateRestaurantSchema), controller.update)
+
+
+router.get('/:restaurantId/categories', categoryController.list);
+
+router.post(
+  '/:restaurantId/categories',
+  restrictTo('ADMIN', 'VENDOR_STAFF'),
+  validate(createCategorySchema),
+  categoryController.create
+);
+
+router.patch(
+  '/:restaurantId/categories/:categoryId',
+  restrictTo('ADMIN', 'VENDOR_STAFF'),
+  validate(updateCategorySchema),
+  categoryController.update
+);
+
+router.delete(
+  '/:restaurantId/categories/:categoryId',
+  restrictTo('ADMIN', 'VENDOR_STAFF'),
+  validate(deleteCategorySchema),
+  categoryController.remove
+);
+
 
 export default router;

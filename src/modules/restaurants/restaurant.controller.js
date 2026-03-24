@@ -1,50 +1,65 @@
-// import * as restaurantService from './restaurants.service.js';
 
-// export const getRestaurants = async (req, res, next) => {
-//   try {
-//     const data = await restaurantService.getAllRestaurants();
-//     res.status(200).json({ success: true, data });
-//   } catch (error) { next(error); }
-// };
-
-// export const createRestaurant = async (req, res, next) => {
-//   try {
-//     const data = await restaurantService.createRestaurant(req.body);
-//     res.status(201).json({ success: true, data });
-//   } catch (error) { next(error); }
-// };
-
-// export const getMenu = async (req, res, next) => {
-//   try {
-//     const data = await restaurantService.getRestaurantMenu(req.params.id);
-//     res.status(200).json({ success: true, data });
-//   } catch (error) { next(error); }
-// };
-
-// export const createCategory = async (req, res, next) => {
-//   try {
-//     const data = await restaurantService.addCategory(req.params.restaurantId, req.body.name, req.body.sortOrder);
-//     res.status(201).json({ success: true, data });
-//   } catch (error) { next(error); }
-// };
-
-// export const createProduct = async (req, res, next) => {
-//   try {
-//     const data = await restaurantService.addProduct(req.params.restaurantId, req.body);
-//     res.status(201).json({ success: true, data });
-//   } catch (error) { next(error); }
-// };
-
+import { RestaurantRepository } from './restaurant.repository.js';
 import { RestaurantService } from './restaurant.service.js';
 
-const restaurantService = new RestaurantService();
+const repository = new RestaurantRepository();
+export const restaurantService = new RestaurantService(repository);
+
+export const create = async (req, res, next) => {
+  try {
+    const restaurant = await restaurantService.createRestaurant(req.user.id, req.body);
+    res.status(201).json({ success: true, data: restaurant });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const update = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const restaurant = await restaurantService.updateRestaurant(req.user, id, req.body);
+    res.status(200).json({ success: true, data: restaurant });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getDetails = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const restaurant = await restaurantService.getRestaurantDetails(id);
+    res.status(200).json({ success: true, data: restaurant });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const list = async (req, res, next) => {
+  try {
+    const result = await restaurantService.listRestaurants(req.query);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 export const updateStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { isOpen } = req.body;
-    const restaurant = await restaurantService.toggleOpenStatus(id, isOpen);
+    const restaurant = await restaurantService.updateRestaurant(req.user, id, { isOpen });
     res.json({ success: true, data: restaurant });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const decommission = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    await restaurantService.decommissionRestaurant(req.user.id, id);
+    res.status(200).json({ success: true, message: 'Restaurant successfully decommissioned.' });
   } catch (error) {
     next(error);
   }
