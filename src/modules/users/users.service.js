@@ -44,15 +44,49 @@ export class UserService {
   async updateProfile(userId, data) {
 
     await this._ensureNoActiveOrders(userId);
-    // Prevent Phone Number Collisions
-    if (data.phoneNumber) {
-      const existing = await this.userRepository.findByPhoneNumber(data.phoneNumber);
-      if (existing && existing.id !== userId) {
-        throw new ConflictError('Phone number is already in use by another account.');
-      }
+    return await this.userRepository.update(userId, data);
+  }
+
+   async requestEmailUpdate(userId, newEmail) {
+    await this._ensureNoActiveOrders(userId);
+
+    const user = await this.userRepository.findByIdWithProfiles(userId);
+    
+    // 1. Uniqueness Check
+    const existing = await this.userRepository.findByEmail(newEmail);
+    if (existing) throw new ConflictError('This email is already registered.');
+
+    // 2. Update DB and revoke verification status
+    const updatedUser = await this.userRepository.updateSensitiveIdentifier(userId, 'EMAIL', newEmail);
+
+    // 3. Trigger new OTP to the new email
+    // Note: We use the existing authService logic to keep OTP generation centralized
+    await authService._generateAndSendOTP(updatedUser, 'EMAIL_VERIFICATION', 'Email Update Verification');
+
+    return updatedUser;
+  }
+
+  async requestPhoneUpdate(userId, newPhone) {
+    await this._ensureNoActiveOrders(userId);
+
+    const user = await this.userRepository.findByIdWithProfiles(userId);
+    
+    // 1. Uniqueness Check
+    const existing = await this.userRepository.findByPhoneNumber(newPhone);
+    if (existing) throw new ConflictError('This phone number is already registered.');
+
+    // 2. Update DB and revoke verification status
+    const updatedUser = await this.userRepository.updateSensitiveIdentifier(userId, 'PHONE', newPhone);
+
+    // 3. Trigger new SMS OTP
+    await authService._generateAndSendPhoneOTP(updatedUser);
+
+    // 4. Operational Safety: If they are a Deliverer, force them offline until they verify the new phone
+    if (user.activeMode === 'DELIVERER') {
+      await this.userRepository.updateAvailability(userId, false);
     }
 
-    return await this.userRepository.update(userId, data);
+    return updatedUser;
   }
 
   async changePassword(userId, { currentPassword, newPassword }) {
@@ -82,7 +116,7 @@ export class UserService {
     return await this.userRepository.createDelivererProfile(userId, data);
   }
 
-  async reviewDelivererApplication(adminId, targetUserId, status) {
+  async reviewDelivererApplication(adminId, targetUserId, status, reason) {
     const user = await this.userRepository.findByIdWithProfiles(targetUserId);
     
     if (!user) throw new NotFoundError(USER_ERRORS.NOT_FOUND);
@@ -102,6 +136,31 @@ export class UserService {
       actorId: adminId,
       action: 'DELIVERER_REVIEW',
       previousValue: user.delivererProfile.verificationStatus,
+      newValue: status,
+      reason
+    });
+
+  }
+  async reviewVendorApplication(adminId, targetUserId, status, reason) {
+    const user = await this.userRepository.findByIdWithProfiles(targetUserId);
+    
+    if (!user) throw new NotFoundError(USER_ERRORS.NOT_FOUND);
+    
+    if (!user.vendorProfile) {
+      throw new NotFoundError('Vendor application not found for this user.');
+    }
+
+    if (user.vendorProfile.verificationStatus !== 'PENDING') {
+      throw new BusinessLogicError('This application has already been processed.');
+    }
+
+    await this.userRepository.updateVendorStatus(targetUserId, status);
+
+    await this.userRepository.logAction({
+      targetUserId,
+      actorId: adminId,
+      action: 'VENDOR_REVIEW',
+      previousValue: user.vendorProfile.verificationStatus,
       newValue: status,
       reason
     });
@@ -133,7 +192,7 @@ export class UserService {
 
     // Role check for VENDOR_STAFF or ADMIN (Optional: restrict their modes if necessary)
     if (user.role === 'VENDOR_STAFF' || user.role === 'ADMIN') {
-       // Admins/Staff usually stay in their roles, but for P2P they can be customers.
+      throw new BusinessLogicError('You are not allowed to switch modes.');
     }
 
     return await this.userRepository.updateActiveMode(userId, targetMode);
@@ -175,12 +234,16 @@ export class UserService {
       throw new BusinessLogicError('Only verified deliverers can set availability.');
     }
 
-    if (user.activeMode !== 'DELIVERER' && isAvailable === true) {
+    if (user.activeMode !== 'DELIVERER') {
       throw new BusinessLogicError('You must switch to Deliverer mode before going online.');
     }
 
-    if (!user.delivererProfile?.payoutAccount && isAvailable) {
-      throw new BusinessLogicError('Payout details must be configured before going online.');
+    if (!user.delivererProfile?.payoutAccount) {
+      throw new BusinessLogicError('Payout Account must be configured before going online.');
+    } else if (!user.delivererProfile?.payoutProvider) {
+      throw new BusinessLogicError('Payout Provider must be configured before going online.');
+    } else if (!user.phoneNumber) {
+      throw new BusinessLogicError('phone number must be set and verified before going online.');
     }
 
     return await this.userRepository.updateAvailability(userId, isAvailable);
@@ -207,12 +270,14 @@ export class UserService {
     return await this.userRepository.updatePayoutInfo(userId, data);
   }
 
-   async changeUserStatus(adminId, targetUserId, { status, reason }) {
+   async changeUserStatus(adminId, targetUserId, status, reason = 'No reason provided') {
     if (adminId === targetUserId) throw new BusinessLogicError('Cannot modify own status.');
 
     const user = await this.userRepository.findById(targetUserId);
     if (!user) throw new NotFoundError(USER_ERRORS.NOT_FOUND);
 
+    status = status.toUpperCase();
+    if(!status) throw new BusinessLogicError('Status is required.');
     const result = await this.userRepository.updateUserStatus(targetUserId, status);
 
     await this.userRepository.logAction({

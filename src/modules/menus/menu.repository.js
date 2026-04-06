@@ -50,10 +50,11 @@ export class MenuRepository {
     });
   }
 
-  async checkNameExistsInRestaurant(restaurantId, name, excludeItemId = null) {
+
+async checkNameExistsInCategory(categoryId, name, excludeItemId = null) {
     const item = await prisma.menuItem.findFirst({
       where: {
-        restaurantId,
+        categoryId,
         isArchived: false,
         name: { equals: name, mode: 'insensitive' },
         id: excludeItemId ? { not: excludeItemId } : undefined

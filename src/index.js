@@ -56,7 +56,7 @@ const shutdown = async (signal) => {
 
 // Listen for termination signals from the OS/Docker
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGINT', () => shutdown('SIGINT')); 
 
 // Catch unhandled process exceptions (Safety net outside Express)
 process.on('uncaughtException', (error) => {
@@ -67,4 +67,4 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason) => {
   console.error('🔥 Unhandled Rejection! Shutting down...', reason);
   shutdown('unhandledRejection');
-});
+}); 

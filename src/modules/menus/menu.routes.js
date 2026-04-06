@@ -54,11 +54,13 @@ router.post(
 );
 
 router.patch(
-  '/items/:itemId',
+  '/items/bulk-availability',
   restrictTo('ADMIN', 'VENDOR_STAFF'),
-  validate(updateMenuItemSchema),
-  menuController.update
+  validate(bulkToggleAvailabilitySchema),
+  menuController.bulkToggleAvailability
 );
+
+
 
 router.patch(
   '/items/:itemId/availability',
@@ -67,18 +69,20 @@ router.patch(
   menuController.toggleAvailability
 );
 
-router.patch(
-  '/items/bulk-availability',
-  restrictTo('ADMIN', 'VENDOR_STAFF'),
-  validate(bulkToggleAvailabilitySchema),
-  menuController.bulkToggleAvailability
-);
+
 
 router.delete(
   '/items/:itemId',
   restrictTo('ADMIN', 'VENDOR_STAFF'),
   validate(deleteMenuItemSchema),
   menuController.remove
+);
+
+router.patch(
+  '/items/:itemId',
+  restrictTo('ADMIN', 'VENDOR_STAFF'),
+  validate(updateMenuItemSchema),
+  menuController.update
 );
 
 

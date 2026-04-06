@@ -1,6 +1,7 @@
-import { NotFoundError, ConflictError, BusinessLogicError } from '../../core/errors/domain.errors.js';
+import { NotFoundError, ConflictError, BusinessLogicError , ForbiddenError} from '../../core/errors/domain.errors.js';
 import { RESTAURANT_ERRORS } from '../../core/errors/error.codes.js';
 import { RestaurantRepository } from '../restaurants/restaurant.repository.js';
+import { isCurrentlyOpen } from '../../core/utils/time.utils.js';
 
 export class MenuService {
   constructor(menuRepository) {
@@ -33,9 +34,9 @@ export class MenuService {
     }
 
     // Name Collision Check
-    const nameExists = await this.menuRepository.checkNameExistsInRestaurant(restaurantId, data.name);
+    const nameExists = await this.menuRepository.checkNameExistsInCategory(data.categoryId, data.name);
     if (nameExists) {
-      throw new ConflictError('An item with this name already exists in your restaurant.');
+      throw new ConflictError('An item with this name already exists in this category.');
     }
 
 
@@ -57,9 +58,12 @@ export class MenuService {
       if (itemCount >= 100) throw new BusinessLogicError('Target category is full (max 100 items).');
     }
 
-    if (data.name && data.name !== item.name) {
-      const nameExists = await this.menuRepository.checkNameExistsInRestaurant(restaurantId, data.name, itemId);
-      if (nameExists) throw new ConflictError('An item with this name already exists in your restaurant.');
+    if (data.name || data.categoryId) {
+      const checkName = data.name || item.name;
+      const nameExists = await this.menuRepository.checkNameExistsInCategory(targetCategoryId, checkName, itemId);
+      if (nameExists) {
+        throw new ConflictError('An item with this name already exists in the target category.');
+      }
     }
 
 
@@ -67,7 +71,7 @@ export class MenuService {
   }
 
   async toggleAvailability(user, restaurantId, itemId, isAvailable, reason) {
-    await this.restaurantService._verifyAccess(user, restaurantId);
+    await this._verifyAccess(user, restaurantId);
 
     const item = await this.menuRepository.findById(itemId, restaurantId);
     if (!item) throw new NotFoundError(RESTAURANT_ERRORS.ITEM_NOT_FOUND);
@@ -76,7 +80,7 @@ export class MenuService {
   }
 
   async deleteMenuItem(user, restaurantId, itemId) {
-    await this.restaurantService._verifyAccess(user, restaurantId);
+    await this._verifyAccess(user, restaurantId);
 
     const item = await this.menuRepository.findById(itemId, restaurantId);
     if (!item) throw new NotFoundError(RESTAURANT_ERRORS.ITEM_NOT_FOUND);
@@ -130,11 +134,8 @@ export class MenuService {
    }
 
    async bulkToggleAvailability(user, restaurantId, itemIds, isAvailable) {
-    await this.restaurantService._verifyAccess(user, restaurantId);
+    await this._verifyAccess(user, restaurantId);
 
-    // UpdateMany handles the verification inherently because the repository 
-    // restricts the update to `where: { id: { in: itemIds }, restaurantId }`.
-    // Any IDs that don't belong to the restaurant are silently ignored, preventing IDOR.
     const result = await this.menuRepository.bulkUpdateAvailability(restaurantId, itemIds, isAvailable);
     
     return { updatedCount: result.count };

@@ -10,7 +10,7 @@ export const create = async (req, res, next) => {
     const restaurant = await restaurantService.createRestaurant(req.user.id, req.body);
     res.status(201).json({ success: true, data: restaurant });
   } catch (error) {
-    next(error);
+    next(error); 
   }
 };
 
@@ -34,7 +34,7 @@ export const getDetails = async (req, res, next) => {
   }
 };
 
-export const list = async (req, res, next) => {
+export const list = async (req, res, next) => { 
   try {
     const result = await restaurantService.listRestaurants(req.query);
     res.status(200).json({ success: true, ...result });

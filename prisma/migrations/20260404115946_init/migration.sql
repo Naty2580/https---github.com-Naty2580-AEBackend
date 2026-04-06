@@ -2,7 +2,7 @@
 CREATE TYPE "VerificationStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
 
 -- CreateEnum
-CREATE TYPE "TokenType" AS ENUM ('EMAIL_VERIFICATION', 'PASSWORD_RESET');
+CREATE TYPE "TokenType" AS ENUM ('EMAIL_VERIFICATION', 'PHONE_VERIFICATION', 'PASSWORD_RESET');
 
 -- CreateEnum
 CREATE TYPE "UserRole" AS ENUM ('CUSTOMER', 'DELIVERER', 'VENDOR_STAFF', 'ADMIN');
@@ -35,14 +35,15 @@ CREATE TYPE "DispatchAction" AS ENUM ('BROADCAST', 'ACCEPTED', 'DECLINED', 'IGNO
 CREATE TABLE "User" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "telegramId" BIGINT NOT NULL,
-    "astuEmail" TEXT NOT NULL,
+    "astuEmail" TEXT,
+    "email" TEXT,
     "fullName" TEXT NOT NULL,
     "phoneNumber" TEXT NOT NULL,
     "password" TEXT NOT NULL,
-    "gender" TEXT,
     "avatarUrl" TEXT,
     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
     "isEmailVerified" BOOLEAN NOT NULL DEFAULT false,
+    "isPhoneVerified" BOOLEAN NOT NULL DEFAULT false,
     "role" "UserRole" NOT NULL DEFAULT 'CUSTOMER',
     "activeMode" "ActiveMode" NOT NULL DEFAULT 'CUSTOMER',
     "lastActiveAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -151,8 +152,10 @@ CREATE TABLE "Restaurant" (
 CREATE TABLE "VendorProfile" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "userId" UUID NOT NULL,
-    "restaurantId" UUID NOT NULL,
+    "restaurantId" UUID,
     "isOwner" BOOLEAN NOT NULL DEFAULT false,
+    "businessDocumentUrl" TEXT NOT NULL,
+    "verificationStatus" "VerificationStatus" NOT NULL DEFAULT 'PENDING',
 
     CONSTRAINT "VendorProfile_pkey" PRIMARY KEY ("id")
 );
@@ -341,6 +344,9 @@ CREATE UNIQUE INDEX "User_telegramId_key" ON "User"("telegramId");
 CREATE UNIQUE INDEX "User_astuEmail_key" ON "User"("astuEmail");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "User_phoneNumber_key" ON "User"("phoneNumber");
 
 -- CreateIndex
@@ -405,6 +411,9 @@ CREATE INDEX "DelivererProfile_totalDeliveries_idx" ON "DelivererProfile"("total
 
 -- CreateIndex
 CREATE INDEX "DelivererProfile_totalEarnings_idx" ON "DelivererProfile"("totalEarnings");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Restaurant_phone_key" ON "Restaurant"("phone");
 
 -- CreateIndex
 CREATE INDEX "Restaurant_lat_lng_idx" ON "Restaurant"("lat", "lng");

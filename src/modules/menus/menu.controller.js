@@ -38,8 +38,9 @@ export const toggleAvailability = async (req, res, next) => {
 export const bulkToggleAvailability = async (req, res, next) => {
   try {
     const { restaurantId } = req.params;
-    const { itemIds, isAvailable, reason } = req.body;
-    const result = await menuService.bulkToggleAvailability(req.user, restaurantId, itemIds, isAvailable, reason);
+    const { itemIds, isAvailable } = req.body;
+    console.log("Bulk toggle request received for items:", itemIds, "to availability:", isAvailable);
+    const result = await menuService.bulkToggleAvailability(req.user, restaurantId, itemIds, isAvailable);
     res.status(200).json({ success: true, data: result });
   } catch (error) {
     next(error);

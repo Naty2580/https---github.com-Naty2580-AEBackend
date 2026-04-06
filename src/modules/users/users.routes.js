@@ -7,7 +7,8 @@ import {
   updateProfileSchema, applyDelivererSchema,
   updateDelivererStatusSchema, assignVendorStaffSchema, toggleModeSchema, setAvailabilitySchema,
   userQuerySchema,
-  updateUserStatusSchema, updatePayoutSchema, deactivateAccountSchema, changePasswordSchema
+  updateUserStatusSchema, updatePayoutSchema, deactivateAccountSchema, 
+  changePasswordSchema, updateEmailSchema, updatePhoneSchema, updateVendorStatusSchema
 } from './users.dto.js';
 
 const router = Router();
@@ -17,6 +18,8 @@ router.use(protect);
 // Self-Service Profile Management
 router.get('/me', userController.getMe);
 router.patch('/me', validate(updateProfileSchema), userController.updateMyProfile);
+router.patch('/me/email', validate(updateEmailSchema), userController.requestEmailUpdate);
+router.patch('/me/phone', validate(updatePhoneSchema), userController.requestPhoneUpdate);
 router.patch('/me/password', validate(changePasswordSchema), userController.changePassword);
 router.delete('/me', validate(deactivateAccountSchema), userController.deactivateMe);
 router.patch('/me/toggle-mode', validate(toggleModeSchema), userController.toggleMode);
@@ -52,6 +55,13 @@ router.patch(
   validate(updateDelivererStatusSchema),
   userController.reviewDeliverer
 );
+
+router.patch(
+  '/:vendorId/vendor-status',
+  restrictTo('ADMIN'),
+  validate(updateVendorStatusSchema),
+  userController.reviewVendor
+);
 router.post(
   '/assign-vendor',
   restrictTo('ADMIN'),
@@ -63,4 +73,4 @@ router.post(
 
 router.get('/fetchAllUsers', userController.fetchAllUsers);
 
-export default router;
+export default router; 

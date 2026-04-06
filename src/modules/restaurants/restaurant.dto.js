@@ -3,6 +3,11 @@ import { z } from 'zod';
 const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const ethioPhoneRegex = /^(09|07)\d{8}$/;
 
+export const restaurantIdParamSchema = z.object({
+  params: z.object({
+    id: z.uuid({ message: "Invalid restaurant ID format" })
+  })
+});
 export const createRestaurantSchema = z.object({
   body: z.object({
     name: z.string().min(2),
@@ -21,7 +26,7 @@ export const createRestaurantSchema = z.object({
 
 export const updateRestaurantSchema = z.object({
   params: z.object({
-    id: z.string().uuid()
+    id: z.uuid()
   }),
   body: z.object({
     name: z.string().trim().min(2).optional(),
@@ -31,7 +36,7 @@ export const updateRestaurantSchema = z.object({
     lng: z.number().min(-180).max(180).optional(),
     minOrderValue: z.number().nonnegative().optional(),
     tags: z.array(z.string().min(2)).max(5).optional(),
-    imageUrl: z.string().url().optional(),
+    imageUrl: z.url().optional(),
     isOpen: z.boolean().optional(),
     openingTime: z.string().regex(timeRegex, " Must be in the format HH:MM").optional(),
     closingTime: z.string().regex(timeRegex, " Must be in the format HH:MM").optional()
@@ -58,7 +63,7 @@ export const queryRestaurantSchema = z.object({
 
 export const toggleStatusSchema = z.object({
   params: z.object({
-    id: z.string().uuid()
+    id: z.uuid()
   }),
   body: z.object({
     isOpen: z.boolean({ required_error: "isOpen is required" })

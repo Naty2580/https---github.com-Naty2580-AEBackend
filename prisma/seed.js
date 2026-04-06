@@ -1,16 +1,13 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
-import  config from '../src/config/env.config.js';
+import config from '../src/config/env.config.js';
 import { PrismaPg } from "@prisma/adapter-pg";
-
 
 const connectionString = `${config.DATABASE_URL}`;
 
-
-
- const adapter = new PrismaPg({ connectionString });
- const prisma =  new PrismaClient({ adapter });
+const adapter = new PrismaPg({ connectionString });
+const prisma = new PrismaClient({ adapter });
 
 // ==========================================
 // REALISTIC MOCK DATA GENERATORS
@@ -38,6 +35,10 @@ async function main() {
 
   // 1. CLEANUP (Reverse order of dependencies to avoid Foreign Key conflicts)
   console.log('🧹 Wiping existing data...');
+  // Wipe verification/refresh tokens to prevent orphaned data
+  await prisma.verificationToken.deleteMany();
+  await prisma.refreshToken.deleteMany();
+  
   await prisma.userAuditLog.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.orderStatusHistory.deleteMany();
@@ -58,7 +59,7 @@ async function main() {
   console.log(`🔐 Hashing default password ('${defaultPassword}')...`);
   const hashedPassword = await bcrypt.hash(defaultPassword, 12);
 
-  // 3. GENERATE IDENTIFIERS IN MEMORY (For blazing fast relational inserts)
+  // 3. GENERATE IDENTIFIERS IN MEMORY 
   const adminId = crypto.randomUUID();
   const vendorIds = Array.from({ length: 4 }, () => crypto.randomUUID());
   const delivererIds = Array.from({ length: 6 }, () => crypto.randomUUID());
@@ -69,15 +70,27 @@ async function main() {
   console.log('👤 Seeding Users...');
   const allUsers = [
     // Admin
-    { id: adminId, telegramId: generateTelegramId(), astuEmail: 'admin.seed@astu.edu.et', fullName: 'System Admin', phoneNumber: generatePhone(), password: hashedPassword, role: 'ADMIN', activeMode: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true },
-    // Vendors
-    ...vendorIds.map((id, i) => ({ id, telegramId: generateTelegramId(), astuEmail: `vendor${i+1}.seed@astu.edu.et`, fullName: `Vendor Staff ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'VENDOR_STAFF', activeMode: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true })),
+    { id: adminId, telegramId: generateTelegramId(), astuEmail: 'admin.seed@astu.edu.et', fullName: 'System Admin', phoneNumber: generatePhone(), password: hashedPassword, role: 'ADMIN', activeMode: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true },
+    
+    // Vendors (Using standard email per architectural updates)
+    ...vendorIds.map((id, i) => ({ 
+      id, telegramId: generateTelegramId(), email: `vendor${i+1}.seed@business.com`, fullName: `Vendor Staff ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'VENDOR_STAFF', activeMode: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true 
+    })),
+    
     // Deliverers
-    ...delivererIds.map((id, i) => ({ id, telegramId: generateTelegramId(), astuEmail: `deliverer${i+1}.seed@astu.edu.et`, fullName: `Campus Deliverer ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'DELIVERER', activeMode: 'DELIVERER', status: 'ACTIVE', isEmailVerified: true })),
+    ...delivererIds.map((id, i) => ({ 
+      id, telegramId: generateTelegramId(), astuEmail: `deliverer${i+1}.seed@astu.edu.et`, fullName: `Campus Deliverer ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'DELIVERER', activeMode: 'DELIVERER', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true 
+    })),
+    
     // Customers
-    ...customerIds.map((id, i) => ({ id, telegramId: generateTelegramId(), astuEmail: `student${i+1}.seed@astu.edu.et`, fullName: `Astu Student ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'CUSTOMER', activeMode: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true })),
+    ...customerIds.map((id, i) => ({ 
+      id, telegramId: generateTelegramId(), astuEmail: `student${i+1}.seed@astu.edu.et`, fullName: `Astu Student ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'CUSTOMER', activeMode: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true 
+    })),
   ];
   await prisma.user.createMany({ data: allUsers });
+
+ 
+
 
   // 5. SEED PROFILES
   console.log('📋 Seeding Profiles...');
@@ -106,7 +119,11 @@ async function main() {
   // 7. ASSIGN VENDOR STAFF
   console.log('👔 Assigning Vendor Staff...');
   const vendorProfiles = vendorIds.slice(0, 3).map((id, i) => ({
-    userId: id, restaurantId: restaurantIds[i], isOwner: true
+    userId: id, 
+    restaurantId: restaurantIds[i], 
+    isOwner: true,
+    verificationStatus: 'APPROVED', // Assuming Admin has approved them
+    businessDocumentUrl: `https://placehold.co/600x400?text=License+${i}`
   }));
   await prisma.vendorProfile.createMany({ data: vendorProfiles });
 
@@ -150,7 +167,7 @@ async function main() {
   console.log('==================================================');
   console.log(`🔑 Test Accounts (Password: ${defaultPassword})`);
   console.log(`   Admin:      admin.seed@astu.edu.et`);
-  console.log(`   Vendor:     vendor1.seed@astu.edu.et`);
+  console.log(`   Vendor:     vendor1.seed@business.com`);
   console.log(`   Deliverer:  deliverer1.seed@astu.edu.et`);
   console.log(`   Customer:   student1.seed@astu.edu.et`);
   console.log('==================================================');

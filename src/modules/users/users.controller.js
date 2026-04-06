@@ -42,6 +42,32 @@ export const updateMyProfile = async (req, res, next) => {
   }
 };
 
+export const requestEmailUpdate = async (req, res, next) => {
+  try {
+    const updated = await userService.requestEmailUpdate(req.user.id, req.body.newEmail);
+    res.status(200).json({ 
+      success: true, 
+      message: 'Email updated. A new verification OTP has been sent.',
+      data: updated 
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const requestPhoneUpdate = async (req, res, next) => {
+  try {
+    const updated = await userService.requestPhoneUpdate(req.user.id, req.body.newPhone);
+    res.status(200).json({ 
+      success: true, 
+      message: 'Phone updated. A new verification SMS has been sent.',
+      data: updated 
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const changePassword = async (req, res, next) => {
   try {
     await userService.changePassword(req.user.id, req.body);
@@ -73,6 +99,21 @@ export const reviewDeliverer = async (req, res, next) => {
     res.status(200).json({ 
       success: true, 
       message: `Deliverer application ${status.toLowerCase()} successfully.` 
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const reviewVendor = async (req, res, next) => {
+  try {
+    const { vendorId } = req.params;
+    const { status, reason } = req.body;
+    await userService.reviewVendorApplication(req.user.id, vendorId, status, reason);
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Vendor application ${status.toLowerCase()} successfully.` 
     });
   } catch (error) {
     next(error);
@@ -144,8 +185,9 @@ export const listUsers = async (req, res, next) => {
 export const updateUserStatus = async (req, res, next) => {
   try {
     const { userId } = req.params;
-    const { status } = req.body;
-    await userService.changeUserStatus(req.user.id, userId, status);
+    const { status, reason } = req.body;
+    if(!reason) reason = 'No reason provided';
+    await userService.changeUserStatus(req.user.id, userId, status, reason);
     res.status(200).json({ success: true, message: `User status updated to ${status}.` });
   } catch (error) {
     next(error);

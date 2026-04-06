@@ -3,6 +3,7 @@ import { AuthRepository } from './auth.repository.js';
 import { UserRepository } from '../users/users.repository.js';
 import { UnauthorizedError } from '../../core/errors/domain.errors.js';
 import { AUTH_ERRORS } from '../../core/errors/error.codes.js';
+import { registerVendorSchema, verifyPhoneSchema } from './auth.dto.js';
 
 const userRepository = new UserRepository();
 const authRepository = new AuthRepository();
@@ -25,10 +26,33 @@ export const register = async (req, res, next) => {
   }
 };
 
+export const registerVendor = async (req, res, next) => {
+  try {
+    const user = await authService.registerVendor(req.body);
+    res.status(201).json({ 
+      success: true, 
+      message: 'Vendor application submitted. Please verify your phone number.',
+      data: user 
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyPhone = async (req, res, next) => {
+  try {
+    const { phoneNumber, otp } = req.body;
+    await authService.verifyPhone(phoneNumber, otp);
+    res.status(200).json({ success: true, message: 'Phone number verified successfully. Awaiting Admin approval.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const login = async (req, res, next) => {
   try {
-    const { astuEmail, password } = req.body;
-    const { accessToken, refreshToken, user } = await authService.login(astuEmail, password);
+    const { identifier, password } = req.body;
+    const { accessToken, refreshToken, user } = await authService.login(identifier, password);
 
     res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS);
 
@@ -87,9 +111,9 @@ export const verifyEmail = async (req, res, next) => {
 
 export const forgotPassword = async (req, res, next) => {
   try {
-    const { astuEmail } = req.body;
-    await authService.forgotPassword(astuEmail);
-    res.status(200).json({ success: true, message: 'If the email exists, an OTP has been sent.' });
+    const { identifier } = req.body;
+    await authService.forgotPassword(identifier);
+    res.status(200).json({ success: true, message: 'If the account exists, an OTP has been sent.' });
   } catch (error) {
     next(error);
   }
@@ -97,8 +121,8 @@ export const forgotPassword = async (req, res, next) => {
 
 export const resetPassword = async (req, res, next) => {
   try {
-    const { astuEmail, otp, newPassword } = req.body;
-    await authService.resetPassword(astuEmail, otp, newPassword);
+    const { identifier, otp, newPassword } = req.body;
+    await authService.resetPassword(identifier, otp, newPassword);
     res.status(200).json({ success: true, message: 'Password reset successfully. Please login again.' });
   } catch (error) {
     next(error);
@@ -108,8 +132,8 @@ export const resetPassword = async (req, res, next) => {
 
 export const resendVerification = async (req, res, next) => {
   try {
-    const { astuEmail } = req.body;
-    await authService.resendVerificationEmail(astuEmail);
+    const { identifier } = req.body;
+    await authService.resendVerification(identifier);
     res.status(200).json({ success: true, message: 'If the account exists and is unverified, a new OTP has been sent.' });
   } catch (error) {
     next(error);

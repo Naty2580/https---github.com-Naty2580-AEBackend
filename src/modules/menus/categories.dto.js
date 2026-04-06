@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import z4 from 'zod/v4';
 
 export const createCategorySchema = z.object({
   params: z.object({
@@ -12,8 +13,8 @@ export const createCategorySchema = z.object({
 
 export const updateCategorySchema = z.object({
   params: z.object({
-    restaurantId: z.string().uuid(),
-    categoryId: z.string().uuid()
+    restaurantId: z.uuid(),
+    categoryId: z.uuid()
   }),
   body: z.object({
     name: z.string().trim().min(2).optional(),
@@ -25,19 +26,19 @@ export const updateCategorySchema = z.object({
 
 export const deleteCategorySchema = z.object({
   params: z.object({
-    restaurantId: z.string().uuid(),
-    categoryId: z.string().uuid()
+    restaurantId: z.uuid(),
+    categoryId: z.uuid()
   })
 });
 
 export const reorderCategoriesSchema = z.object({
   params: z.object({
-    restaurantId: z.string().uuid()
+    restaurantId: z.uuid()
   }),
   body: z.object({
     categories: z.array(
       z.object({
-        id: z.string().uuid(),
+        id: z.uuid(),
         sortOrder: z.number().int().min(0)
       })
     ).min(2, "At least two categories required for reordering")

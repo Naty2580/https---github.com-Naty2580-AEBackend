@@ -8,11 +8,19 @@ const astuEmailValidator = z
     /^[a-z0-9._%+-]+@astu\.edu\.et$/,
     { message: "Must be a valid @astu.edu.et university email address" }
   );
+const ethioPhoneRegex = /^(09|07)\d{8}$/;
+
+const identifierValidator = z.string().trim().toLowerCase()
+  .refine(val => 
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val) || // Is standard email
+    ethioPhoneRegex.test(val),                // Or is valid phone
+    { message: "Must be a valid email or Ethiopian phone number" }
+  );
 
 export const loginSchema = z.object({
   body: z.object({
-    astuEmail: astuEmailValidator,
-    password: z.string().min(8 , "Password must be at least 8 characters")
+    identifier: identifierValidator, 
+    password: z.string().min(1)
   })
 });
 
@@ -21,8 +29,25 @@ export const registerSchema = z.object({
     telegramId: z.coerce.bigint(),
     astuEmail: astuEmailValidator,
     fullName: z.string().min(3),
-    phoneNumber: z.string().trim().regex(/^(09|07)\d{8}$/, { message: "Must be a valid Ethiopian phone number" }),
     password: z.string().min(8 , "Password must be at least 8 characters")
+  })
+});
+
+export const registerVendorSchema = z.object({
+  body: z.object({
+    fullName: z.string().trim().min(3, "Full name or Business contact name required"),
+    telegramId: z.coerce.bigint(),
+    phoneNumber: z.string().trim().regex(ethioPhoneRegex, "Valid Ethiopian phone number required"),
+    email: z.email("Standard email required for business communications").toLowerCase(),
+    password: z.string().min(8),
+    businessDocumentUrl: z.url("Must provide a valid link to business registration documents")
+  })
+});
+
+export const verifyPhoneSchema = z.object({
+  body: z.object({
+    phoneNumber: z.string().regex(ethioPhoneRegex),
+    otp: z.string().length(6)
   })
 });
 
@@ -41,19 +66,19 @@ export const verifyEmailSchema = z.object({
 
 export const forgotPasswordSchema = z.object({
   body: z.object({
-    astuEmail: astuEmailValidator
+     identifier: identifierValidator
   })
 });
 
 export const resendVerificationSchema = z.object({
   body: z.object({
-    astuEmail: astuEmailValidator
+    identifier: identifierValidator
   })
 });
 
 export const resetPasswordSchema = z.object({
   body: z.object({
-    astuEmail: astuEmailValidator,
+    identifier: identifierValidator,
     otp: z.string().length(6),
     newPassword: z.string().min(8 , "Password must be at least 8 characters")
   })

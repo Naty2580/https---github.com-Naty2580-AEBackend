@@ -81,7 +81,7 @@ export class CategoryService {
   }
 
   async reorderCategories(user, restaurantId, categories) {
-    await this.restaurantService._verifyAccess(user, restaurantId);
+    await this._verifyAccess(user, restaurantId);
 
     // Defensive Check: Ensure all IDs provided actually exist in the DB for this restaurant
     const existingCategories = await this.categoryRepository.findAllByRestaurant(restaurantId);

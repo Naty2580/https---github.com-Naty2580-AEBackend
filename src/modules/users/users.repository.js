@@ -13,6 +13,8 @@ export class UserRepository {
       where: { astuEmail }
     });
   }
+   
+  
 
   async findByTelegramId(telegramId) {
     return await prisma.user.findUnique({
@@ -38,18 +40,20 @@ export class UserRepository {
   }
 
   async update(id, data) {
-    return await prisma.user.update({ where: { id }, data,select: { id: true, fullName: true, phoneNumber: true, avatarUrl: true,role: true, activeMode: true } });
+    return await prisma.user.update({ where: { id }, data, select: { id: true, email: true, fullName: true, phoneNumber: true, avatarUrl: true, role: true, activeMode: true } });
   }
 
-   async findByIdWithProfiles(id) {
+  async findByIdWithProfiles(id) {
     return await prisma.user.findUnique({
       where: { id },
       select: {
         id: true,
         astuEmail: true,
+        email: true,
         fullName: true,
         phoneNumber: true,
         role: true,
+        activeMode: true,
         status: true,
         customerProfile: true,
         delivererProfile: true,
@@ -58,10 +62,21 @@ export class UserRepository {
     });
   }
 
+  async findByIdentifier(identifier) {
+    return await prisma.user.findFirst({
+      where: {
+        OR: [
+          { astuEmail: identifier },
+          { email: identifier },
+          { phoneNumber: identifier }
+        ]
+      }
+    });
+  }
   async hasActiveOrders(userId) {
     const activeStatuses = [
-      'ASSIGNED', 'AWAITING_PAYMENT', 'PAYMENT_RECEIVED', 
-      'VENDOR_BEING_PREPARED', 'VENDOR_FINISHED', 
+      'ASSIGNED', 'AWAITING_PAYMENT', 'PAYMENT_RECEIVED',
+      'VENDOR_BEING_PREPARED', 'VENDOR_FINISHED',
       'VENDOR_READY_FOR_PICKUP', 'PICKED_UP', 'EN_ROUTE', 'ARRIVED'
     ];
 
@@ -85,11 +100,11 @@ export class UserRepository {
           select: { rating: true, _count: { select: { orders: true } } }
         },
         delivererProfile: {
-          select: { 
-            rating: true, 
-            verificationStatus: true, 
+          select: {
+            rating: true,
+            verificationStatus: true,
             isAvailable: true,
-            _count: { select: { deliveries: true } } 
+            _count: { select: { deliveries: true } }
           }
         },
         vendorProfile: { include: { restaurant: true } }
@@ -101,7 +116,6 @@ export class UserRepository {
     return await prisma.delivererProfile.create({
       data: {
         userId,
-        idCardUrl: data.idCardUrl,
         payoutProvider: data.payoutProvider,
         payoutAccount: data.payoutAccount,
         verificationStatus: 'PENDING'
@@ -109,7 +123,23 @@ export class UserRepository {
     });
   }
 
-   async updateDelivererStatus(userId, status) {
+  async updateVendorStatus(userId, status) {
+
+    return await prisma.$transaction([
+      prisma.vendorProfile.update({
+        where: { userId },
+        data: {
+          verificationStatus: status === 'REVOKED' ? 'REJECTED' : status,
+        }
+      }),
+      prisma.user.update({
+        where: { id: userId },
+        data: { status: status === 'REVOKED' ? 'BANNED' : 'ACTIVE' }
+      })
+    ]);
+  }
+
+  async updateDelivererStatus(userId, status) {
 
     const isApproved = status === 'APPROVED';
 
@@ -119,7 +149,7 @@ export class UserRepository {
       prisma.delivererProfile.update({
         where: { userId },
         data: {
-         verificationStatus: status === 'REVOKED' ? 'REJECTED' : status,
+          verificationStatus: status === 'REVOKED' ? 'REJECTED' : status,
           isVerified: isApproved,
           isAvailable: false // Default to offline
         }
@@ -131,14 +161,14 @@ export class UserRepository {
     ]);
   }
 
-   async updatePassword(id, hashedPassword) {
+  async updatePassword(id, hashedPassword) {
     return await prisma.user.update({
       where: { id },
       data: { password: hashedPassword }
     });
   }
-  
-   async updatePayoutInfo(userId, data) {
+
+  async updatePayoutInfo(userId, data) {
     return await prisma.delivererProfile.update({
       where: { userId },
       data: {
@@ -146,14 +176,14 @@ export class UserRepository {
         payoutAccount: data.payoutAccount
       }
     });
-   }
+  }
 
-   async delete(id) {
+  async delete(id) {
     return await prisma.user.update({ where: { id }, data: { isActive: false } });
   }
 
   async updateActiveMode(userId, mode) {
-   return await prisma.$transaction(async (tx) => {
+    return await prisma.$transaction(async (tx) => {
       const user = await tx.user.update({
         where: { id: userId },
         data: { activeMode: mode },
@@ -179,31 +209,40 @@ export class UserRepository {
       select: { isAvailable: true }
     });
   }
-   async createAuditLog(data) {
+  async createAuditLog(data) {
     return await prisma.userAuditLog.create({ data });
   }
 
-   // ==========================================
+  // ==========================================
   // VENDOR STAFF MANAGEMENT
   // ==========================================
-  
+
   async checkRestaurantExists(restaurantId) {
     return await prisma.restaurant.findUnique({ where: { id: restaurantId } });
   }
 
   async assignVendorStaff(userId, restaurantId, isOwner) {
-    return await prisma.$transaction([
-      prisma.vendorProfile.upsert({
-        where: { userId },
-        update: { restaurantId, isOwner },
-        create: { userId, restaurantId, isOwner }
-      }),
-      prisma.user.update({
-        where: { id: userId },
-        data: { role: 'VENDOR_STAFF' }
-      })
-    ]);
-  }
+  return await prisma.$transaction(async (tx) => {
+    
+    const profile = await tx.vendorProfile.findUnique({
+      where: { userId }
+    });
+
+    if (!profile) {
+      throw new Error("Vendor profile does not exist");
+    }
+
+    await tx.vendorProfile.update({
+      where: { userId },
+      data: { restaurantId, isOwner }
+    });
+
+    await tx.user.update({
+      where: { id: userId },
+      data: { role: 'VENDOR_STAFF' }
+    });
+  });
+}
 
   // ==========================================
   // ADMIN USER MANAGEMENT
@@ -216,7 +255,9 @@ export class UserRepository {
     if (search) {
       where.OR = [
         { fullName: { contains: search, mode: 'insensitive' } },
-        { astuEmail: { contains: search, mode: 'insensitive' } }
+        { astuEmail: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { phoneNumber: { contains: search } }
       ];
     }
 
@@ -230,6 +271,8 @@ export class UserRepository {
         select: {
           id: true,
           astuEmail: true,
+          email: true,
+          phoneNumber: true,
           fullName: true,
           role: true,
           status: true,
@@ -264,7 +307,7 @@ export class UserRepository {
     return await prisma.$transaction([
       prisma.user.update({
         where: { id: userId },
-        data: { status: 'DEACTIVATED', isActive: false }
+        data: { status: 'DEACTIVATED' }
       }),
       prisma.refreshToken.updateMany({
         where: { userId },
@@ -274,12 +317,12 @@ export class UserRepository {
   }
   async logAction(data) {
     return await prisma.userAuditLog.create({ data });
-  
+
   }
 
   async canDeactivate(userId) {
     const activeOrders = await this.hasActiveOrders(userId);
-    
+
     // Check for open disputes
     const openDisputes = await prisma.dispute.count({
       where: {
@@ -291,5 +334,21 @@ export class UserRepository {
     return !activeOrders && openDisputes === 0;
   }
 
+  async updateSensitiveIdentifier(userId, field, newValue) {
+    const data = {};
 
+    if (field === 'EMAIL') {
+      data.astuEmail = newValue;
+      data.isEmailVerified = false; // Revoke verification
+    } else if (field === 'PHONE') {
+      data.phoneNumber = newValue;
+      data.isPhoneVerified = false; // Revoke verification
+    }
+
+    return await prisma.user.update({
+      where: { id: userId },
+      data,
+      select: { id: true, astuEmail: true, isEmailVerified: true, phoneNumber: true, isPhoneVerified: true }
+    });
+  }
 }

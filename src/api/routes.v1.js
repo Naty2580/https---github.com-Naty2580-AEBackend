@@ -23,7 +23,7 @@ router.get('/health', (req, res) => {
 router.use('/users', userRoutes);
 router.use('/auth', authRoutes);
 router.use('/restaurants', restaurantRoutes);
-router.use('/restaurants/:restaurantId/menus', menuRoutes);
+router.use('/restaurants/:restaurantId', menuRoutes);
 
 // Global menu search endpoint (no restaurantId in path)
 router.get(

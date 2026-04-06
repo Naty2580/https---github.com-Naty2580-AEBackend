@@ -55,7 +55,7 @@ export const deleteMenuItemSchema = z.object({
 
 export const queryMenuItemsSchema = z.object({
   params: z.object({
-    restaurantId: z.string().uuid()
+    restaurantId: z.uuid()
   }),
   query: z.object({
     page: z.coerce.number().int().positive().default(1),
@@ -77,7 +77,7 @@ export const bulkToggleAvailabilitySchema = z.object({
     restaurantId: z.string().uuid()
   }),
   body: z.object({
-    itemIds: z.array(z.string().uuid()).min(1, "Must provide at least one item ID"),
-    isAvailable: z.boolean({ required_error: "Availability status is required" })
+    itemIds: z.array(z.string().uuid()).min(1),
+    isAvailable: z.boolean()
   })
 });

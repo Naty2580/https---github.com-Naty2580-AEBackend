@@ -5,12 +5,23 @@ import { UnauthorizedError, ConflictError, BusinessLogicError, NotFoundError, Fo
 import { AUTH_ERRORS } from '../../core/errors/error.codes.js';
 import { generateAccessToken, generateRefreshToken } from '../../core/utils/token.utils.js';
 import { emailAdapter } from '../../infrastructure/email/email.adapter.js';
+import { only } from 'node:test';
 
+const mockSendSMS = async (phone, otp) => {
+  console.log(`[SMS MOCK] To: ${phone} | OTP: ${otp}`);
+};
 
 export class AuthService {
   constructor(userRepository, authRepository) {
     this.userRepository = userRepository;
     this.authRepository = authRepository;
+  }
+
+    async _generateAndSendPhoneOTP(user) {
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const tokenHash = crypto.createHash('sha256').update(otp).digest('hex');
+    await this.authRepository.storeVerificationToken(user.id, tokenHash, 'PHONE_VERIFICATION');
+    await mockSendSMS(user.phoneNumber, otp);
   }
 
   async _generateAndSendOTP(user, type, purpose) {
@@ -32,33 +43,81 @@ export class AuthService {
           telegramId: data.telegramId,
           astuEmail: data.astuEmail,
           fullName: data.fullName,
-          phoneNumber: data.phoneNumber,
           password: hashedPassword,
-          gender: data.gender,
-          role: data.role || 'CUSTOMER',
           isEmailVerified: false
         }
       });
 
-
-      if (newUser.role === 'CUSTOMER') {
       await tx.customerProfile.create({ data: { userId: newUser.id } });
-      } else if (newUser.role === 'VENDOR_STAFF') {
-        await tx.vendorProfile.create({ data: { userId: newUser.id } });
-      } else if (newUser.role === 'DELIVERER') {
-        await tx.delivererProfile.create({ 
-          data: {  userId: newUser.id} });
-      }
-
       this._generateAndSendOTP(newUser, 'EMAIL_VERIFICATION', 'Account Verification').catch(console.error);
-
-
       return { id: newUser.id, astuEmail: newUser.astuEmail, role: newUser.role };
     });
   }
 
-  async login(email, password) {
-    const user = await this.userRepository.findByEmail(email);
+   async registerVendor(data) {
+    // 1. Uniqueness Checks
+    const existingPhone = await prisma.user.findUnique({ where: { phoneNumber: data.phoneNumber } });
+    if (existingPhone) throw new ConflictError('User with this phone number already exists');
+
+    const existingEmail = await prisma.user.findUnique({ where: { email: data.email } });
+    if (existingEmail) throw new ConflictError('User with this email already exists');
+
+    const hashedPassword = await bcrypt.hash(data.password, 12);
+
+    return await prisma.$transaction(async (tx) => {
+      // 2. Create User as VENDOR_STAFF, but unverified
+      const newUser = await tx.user.create({
+        data: {
+          fullName: data.fullName,
+          phoneNumber: data.phoneNumber,
+          telegramId: data.telegramId,
+          email: data.email,
+          password: hashedPassword,
+          role: 'VENDOR_STAFF',
+          activeMode: 'CUSTOMER',
+          isEmailVerified: true, 
+          isPhoneVerified: false
+        }
+      });
+
+      // 3. Create Pending Vendor Profile
+      await tx.vendorProfile.create({
+        data: {
+          userId: newUser.id,
+          businessDocumentUrl: data.businessDocumentUrl,
+          isOwner: true,
+          verificationStatus: 'PENDING'
+        }
+      });
+
+      // 4. Trigger SMS OTP
+      this._generateAndSendPhoneOTP(newUser).catch(console.error);
+
+      return { id: newUser.id, phoneNumber: newUser.phoneNumber, role: newUser.role };
+    });
+  }
+
+  async verifyPhone(phoneNumber, otp) {
+    const user = await prisma.user.findUnique({ where: { phoneNumber } });
+    if (!user) throw new NotFoundError('User not found');
+    if (user.isEmailVerified) throw new BusinessLogicError('Phone already verified'); // Reusing flag for simplicity
+
+    const record = await this.authRepository.findVerificationToken(user.id, 'PHONE_VERIFICATION');
+    if (!record || new Date() > record.expiresAt) {
+      throw new BusinessLogicError('OTP expired or invalid');
+    }
+
+    const hashedInput = crypto.createHash('sha256').update(otp).digest('hex');
+    if (record.tokenHash !== hashedInput) throw new BusinessLogicError('Invalid OTP');
+
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: user.id }, data: { isEmailVerified: true } }),
+      prisma.verificationToken.delete({ where: { id: record.id } })
+    ]);
+  }
+
+  async login(identifier, password) {
+    const user = await this.userRepository.findByIdentifier(identifier);
     if (!user) {
       throw new UnauthorizedError(AUTH_ERRORS.INVALID_CREDENTIALS);
     }
@@ -83,7 +142,7 @@ export class AuthService {
       throw new BusinessLogicError(AUTH_ERRORS.USER_BANNED);
     }
 
-    if (!user.isEmailVerified) {
+   if (!user.isEmailVerified && !user.isPhoneVerified) {
       throw new ForbiddenError(AUTH_ERRORS.ACCOUNT_PENDING);
     }
 
@@ -119,18 +178,24 @@ export class AuthService {
     ]);
   }
 
-  async forgotPassword(astuEmail) {
-    const user = await this.userRepository.findByEmail(astuEmail);
+  async forgotPassword(identifier) {
+    const user = await this.userRepository.findByIdentifier(identifier);
     if (!user) return; // Prevent email enumeration attacks by silently succeeding
 
-    await this._generateAndSendOTP(user, 'PASSWORD_RESET', 'Password Reset');
+    if (user.role === 'VENDOR_STAFF') {
+      await this._generateAndSendPhoneOTP(user); // Vendors use SMS for recovery
+    } else {
+      await this._generateAndSendOTP(user, 'PASSWORD_RESET', 'Password Reset');
+    }
   }
 
-  async resetPassword(astuEmail, otp, newPassword) {
-    const user = await this.userRepository.findByEmail(astuEmail);
+  async resetPassword(identifier, otp, newPassword) {
+    const user = await this.userRepository.findByIdentifier(identifier);
     if (!user) throw new NotFoundError('User not found');
 
-    const record = await this.authRepository.findVerificationToken(user.id, 'PASSWORD_RESET');
+    const tokenType = user.role === 'VENDOR_STAFF' ? 'PHONE_VERIFICATION' : 'PASSWORD_RESET';
+
+    const record = await this.authRepository.findVerificationToken(user.id, tokenType);
     if (!record || new Date() > record.expiresAt) {
       throw new BusinessLogicError('OTP expired or invalid');
     }
@@ -189,21 +254,20 @@ export class AuthService {
     await this.authRepository.revokeAllUserTokens(userId);
   }
 
-  // Add this method inside the AuthService class
-
-  async resendVerificationEmail(astuEmail) {
-    const user = await this.userRepository.findByEmail(astuEmail);
+  async resendVerification(identifier) {
+    const user = await this.userRepository.findByIdentifier(identifier);
 
     if (!user) {
       return; // Silent success to prevent email enumeration
     }
 
-    if (user.isEmailVerified) {
+    if (user.isEmailVerified || user.isPhoneVerified) {
       throw new BusinessLogicError('Account is already verified.');
     }
 
     // Rate limit check: Prevent spamming the resend button
     const existingToken = await this.authRepository.findVerificationToken(user.id, 'EMAIL_VERIFICATION');
+
     if (existingToken) {
       const timeSinceCreation = (new Date() - existingToken.createdAt) / 1000; // in seconds
       if (timeSinceCreation < 60) {
@@ -211,7 +275,10 @@ export class AuthService {
       }
     }
 
-    await this._generateAndSendOTP(user, 'EMAIL_VERIFICATION', 'Account Verification (Resend)');
-  }
+if (user.role === 'VENDOR_STAFF') {
+      await this._generateAndSendPhoneOTP(user);
+    } else {
+      await this._generateAndSendOTP(user, 'EMAIL_VERIFICATION', 'Account Verification (Resend)');
+    }  }
 
 }

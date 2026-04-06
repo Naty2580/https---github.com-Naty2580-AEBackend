@@ -16,6 +16,7 @@ enum VerificationStatus {
 
 enum TokenType {
   EMAIL_VERIFICATION
+  PHONE_VERIFICATION
   PASSWORD_RESET
 }
 
@@ -96,24 +97,25 @@ enum DispatchAction {
 // ================= MODELS =================
 
 model User {
-  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  telegramId      BigInt     @unique
-  astuEmail       String     @unique
-  fullName        String
-  phoneNumber     String     @unique
-  password        String 
-  gender          String?  
-  avatarUrl       String?
-  status          String     @default("ACTIVE") // 'ACTIVE', 'BANNED', 'PENDING' 
-  isEmailVerified Boolean    @default(false)
-  role            UserRole   @default(CUSTOMER)
-  activeMode      ActiveMode @default(CUSTOMER)
-  lastActiveAt     DateTime   @default(now())
-  deviceToken      String?    // For push notifications
-   failedLoginAttempts Int        @default(0)
+  id                  String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  telegramId          BigInt     @unique
+  astuEmail           String?    @unique // Optional, only customer and deliverers may have an ASTU email. Unique if provided.
+  email               String?    @unique // Optional vendors are not required to have an astu email. Unique if provided.
+  fullName            String
+  phoneNumber         String?    @unique
+  password            String
+  avatarUrl           String?
+  status              String     @default("ACTIVE") // 'ACTIVE', 'BANNED', 'PENDING' 
+  isEmailVerified     Boolean    @default(false)
+  isPhoneVerified     Boolean    @default(false)
+  role                UserRole   @default(CUSTOMER)
+  activeMode          ActiveMode @default(CUSTOMER)
+  lastActiveAt        DateTime   @default(now())
+  deviceToken         String? // For push notifications
+  failedLoginAttempts Int        @default(0)
   lockedUntil         DateTime?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
   // Profiles
   customerProfile  CustomerProfile?
@@ -121,24 +123,23 @@ model User {
   vendorProfile    VendorProfile?
 
   // System Relations (Root User level)
-  refreshTokens RefreshToken[]
+  refreshTokens      RefreshToken[]
   verificationTokens VerificationToken[]
-  statusChanges    OrderStatusHistory[]
-  notifications    Notification[]
-  auditLogs       UserAuditLog[] @relation("UserAudited")
-  performedAudits UserAuditLog[] @relation("UserAuditor")
-  ratingsGiven     Rating[]      @relation("RatingsGiven")
-  ratingsReceived  Rating[]      @relation("RatingsReceived")
-  ledgerEntries    LedgerEntry[]
-  disputesRaised   Dispute[]     @relation("DisputesRaised")
-  disputesAssigned Dispute[]     @relation("DisputesAssigned")
-  dispatchLogs     DispatchLog[]
+  statusChanges      OrderStatusHistory[]
+  notifications      Notification[]
+  auditLogs          UserAuditLog[]       @relation("UserAudited")
+  performedAudits    UserAuditLog[]       @relation("UserAuditor")
+  ratingsGiven       Rating[]             @relation("RatingsGiven")
+  ratingsReceived    Rating[]             @relation("RatingsReceived")
+  ledgerEntries      LedgerEntry[]
+  disputesRaised     Dispute[]            @relation("DisputesRaised")
+  disputesAssigned   Dispute[]            @relation("DisputesAssigned")
+  dispatchLogs       DispatchLog[]
 
   @@index([astuEmail])
   @@index([telegramId])
   @@index([role, status])
 }
-
 
 model RefreshToken {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -155,51 +156,48 @@ model RefreshToken {
 
 // ADD this model to schema.prisma
 model VerificationToken {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String   @db.Uuid
-  tokenHash String   @unique // Store hashed OTP/Token, never plain text
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique // Store hashed OTP/Token, never plain text
   type      TokenType
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, type])
 }
 
 model UserAuditLog {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  targetUserId String   @db.Uuid
-  actorId     String   @db.Uuid
-  action      String   // e.g., "ROLE_CHANGE", "STATUS_CHANGE", "DELIVERER_REVIEW"
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  targetUserId  String   @db.Uuid
+  actorId       String   @db.Uuid
+  action        String // e.g., "ROLE_CHANGE", "STATUS_CHANGE", "DELIVERER_REVIEW"
   previousValue String?
-  newValue    String?
-  reason      String?
-  createdAt   DateTime @default(now())
+  newValue      String?
+  reason        String?
+  createdAt     DateTime @default(now())
 
-  targetUser  User     @relation("UserAudited", fields: [targetUserId], references: [id])
-  actor       User     @relation("UserAuditor", fields: [actorId], references: [id])
+  targetUser User @relation("UserAudited", fields: [targetUserId], references: [id])
+  actor      User @relation("UserAuditor", fields: [actorId], references: [id])
 
   @@index([targetUserId])
   @@index([actorId])
 }
 
-
 model CustomerProfile {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId           String   @unique @db.Uuid
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  defaultLocation String?
-  rating          Decimal  @default(5.0) @db.Decimal(3, 2)
-  totalOrders     Int      @default(0)
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                 String   @unique @db.Uuid
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultLocation        String?
+  rating                 Decimal  @default(5.0) @db.Decimal(3, 2)
+  totalOrders            Int      @default(0)
   prefferedPaymentMethod String? // e.g., 'CBE', 'Telebirr'
-  bookmarkRestaurants String[] // List of restaurant IDs
-  bookmarkMeals String[] // List of meal IDs
-   
+  bookmarkRestaurants    String[] // List of restaurant IDs
+  bookmarkMeals          String[] // List of meal IDs
 
-  
   // Relations
-  orders           Order[]
+  orders Order[]
 
   @@index([defaultLocation])
   @@index([rating])
@@ -213,19 +211,19 @@ model DelivererProfile {
   isVerified         Boolean            @default(false)
   verificationStatus VerificationStatus @default(PENDING)
   isOnline           Boolean            @default(false)
-  currentLocation    String?            // Nullable when offline
+  currentLocation    String? // Nullable when offline
   rating             Decimal            @default(5.0) @db.Decimal(3, 2)
   isAvailable        Boolean            @default(false)
-  payoutAccount      String?            // Nullable until verified
-  payoutProvider     String?            // telebirr, cbe
+  payoutAccount      String? // Nullable until verified
+  payoutProvider     String? // telebirr, cbe
   totalDeliveries    Int                @default(0)
   totalEarnings      Decimal            @default(0.00) @db.Decimal(10, 2)
-  
+
   // Relations
-  deliveries         Order[]
+  deliveries Order[]
 
   @@index([isVerified])
-  @@index([userId,isOnline])
+  @@index([userId, isOnline])
   @@index([rating])
   @@index([isAvailable])
   @@index([totalDeliveries])
@@ -233,23 +231,23 @@ model DelivererProfile {
 }
 
 model Restaurant {
-  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name      String
-  phone     String     @unique // Added from PRD
-  mode      VendorMode @default(VENDOR_MANAGED) // Added from PRD
-  location  String
-  lat       Float
-  lng       Float
-  isOpen    Boolean    @default(false)
-  isActive  Boolean    @default(true) 
-  openingTime  String?    // Format: "HH:mm" (e.g., "08:00")
-  closingTime  String?     // Format: "HH:mm" (e.g., "20:00")
-  imageUrl  String?
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  phone         String     @unique // Added from PRD
+  mode          VendorMode @default(VENDOR_MANAGED) // Added from PRD
+  location      String
+  lat           Float
+  lng           Float
+  isOpen        Boolean    @default(false)
+  isActive      Boolean    @default(true)
+  openingTime   String? // Format: "HH:mm" (e.g., "08:00")
+  closingTime   String? // Format: "HH:mm" (e.g., "20:00")
+  imageUrl      String?
   minOrderValue Decimal    @default(0.00) @db.Decimal(10, 2)
   avgRating     Decimal    @default(5.00) @db.Decimal(3, 2)
   totalReviews  Int        @default(0)
-  tags         String[]   @default([]) // e.g., ["Traditional", "Juice", "Cafe"]
-  
+  tags          String[]   @default([]) // e.g., ["Traditional", "Juice", "Cafe"]
+
   // Relations
   staff      VendorProfile[]
   categories Category[]
@@ -262,15 +260,16 @@ model Restaurant {
 }
 
 model VendorProfile {
-  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String     @unique @db.Uuid
-  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  restaurantId String     @db.Uuid
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  isOwner      Boolean    @default(false)
+  id                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId              String             @unique @db.Uuid
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurantId        String?            @db.Uuid
+  restaurant          Restaurant?        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  isOwner             Boolean            @default(false)
+  businessDocumentUrl String
+  verificationStatus  VerificationStatus @default(PENDING)
 
   @@index([restaurantId])
-
 }
 
 model Category {
@@ -280,31 +279,31 @@ model Category {
   name         String
   sortOrder    Int        @default(0)
   isArchived   Boolean    @default(false)
-  
+
   // Relations
-  products     MenuItem[]
+  products MenuItem[]
 
   @@index([restaurantId])
 }
 
 model MenuItem {
-  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  restaurantId String     @db.Uuid
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  categoryId   String     @db.Uuid
-  category     Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  name         String
-  description  String?
-  price        Decimal    @db.Decimal(10, 2)
-  imageUrl     String?
-  isAvailable  Boolean    @default(true)
-  isArchived   Boolean    @default(false)
-  prepTimeMins Int        @default(15)
-  isFasting    Boolean    @default(false)
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  restaurantId       String     @db.Uuid
+  restaurant         Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  categoryId         String     @db.Uuid
+  category           Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name               String
+  description        String?
+  price              Decimal    @db.Decimal(10, 2)
+  imageUrl           String?
+  isAvailable        Boolean    @default(true)
+  isArchived         Boolean    @default(false)
+  prepTimeMins       Int        @default(15)
+  isFasting          Boolean    @default(false)
   availabilityReason String? // e.g., "Sold out", "Out of season"
-  
+
   // Relations
-  orderItems   OrderItem[]
+  orderItems OrderItem[]
 
   @@index([restaurantId])
   @@index([categoryId])
@@ -314,44 +313,43 @@ model MenuItem {
 }
 
 model Order {
-  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  shortId        String        @unique // e.g., AE-1024
-  customerId     String        @db.Uuid
-  delivererId    String?       @db.Uuid
-  restaurantId   String        @db.Uuid
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shortId               String    @unique // e.g., AE-1024
+  customerId            String    @db.Uuid
+  delivererId           String?   @db.Uuid
+  restaurantId          String    @db.Uuid
   estimatedDeliveryTime DateTime?
-  
+
   // Financials
-  foodPrice      Decimal       @db.Decimal(10, 2)
-  deliveryFee    Decimal       @db.Decimal(10, 2)
-  transactionFee Decimal       @default(0.00) @db.Decimal(10, 2)
-  serviceFee     Decimal       @db.Decimal(10, 2)
-  tip            Decimal       @default(0.00) @db.Decimal(10, 2) // Added from PRD
-  totalAmount    Decimal       @db.Decimal(10, 2)
-  
+  foodPrice      Decimal @db.Decimal(10, 2)
+  deliveryFee    Decimal @db.Decimal(10, 2)
+  transactionFee Decimal @default(0.00) @db.Decimal(10, 2)
+  serviceFee     Decimal @db.Decimal(10, 2)
+  tip            Decimal @default(0.00) @db.Decimal(10, 2) // Added from PRD
+  totalAmount    Decimal @db.Decimal(10, 2)
+
   // State
-  status         OrderStatus   @default(CREATED)
-  paymentStatus  PaymentStatus @default(AWAITING_PAYMENT)
-  otpCode        String        @unique
-  otpVerifiedAt  DateTime?
-  chapaRef       String?       @unique
-  
-  
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  status        OrderStatus   @default(CREATED)
+  paymentStatus PaymentStatus @default(AWAITING_PAYMENT)
+  otpCode       String        @unique
+  otpVerifiedAt DateTime?
+  chapaRef      String?       @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  customer       CustomerProfile   @relation(fields: [customerId], references: [id])
-  deliverer      DelivererProfile? @relation(fields: [delivererId], references: [id])
-  restaurant     Restaurant        @relation(fields: [restaurantId], references: [id])
-  
-  items          OrderItem[]
-  payments       Payment[]
-  ratings        Rating[]
-  statusHistory  OrderStatusHistory[]
-  ledgerEntries  LedgerEntry[]
-  disputes       Dispute[]
-  dispatchLogs   DispatchLog[]
+  customer   CustomerProfile   @relation(fields: [customerId], references: [id])
+  deliverer  DelivererProfile? @relation(fields: [delivererId], references: [id])
+  restaurant Restaurant        @relation(fields: [restaurantId], references: [id])
+
+  items         OrderItem[]
+  payments      Payment[]
+  ratings       Rating[]
+  statusHistory OrderStatusHistory[]
+  ledgerEntries LedgerEntry[]
+  disputes      Dispute[]
+  dispatchLogs  DispatchLog[]
 
   @@index([status])
   @@index([customerId])
@@ -371,44 +369,43 @@ model OrderItem {
 }
 
 model OrderStatusHistory {
-  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orderId   String       @db.Uuid
-  order     Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  oldStatus OrderStatus?
-  newStatus OrderStatus
-  changedById String     @db.Uuid
-  user      User         @relation(fields: [changedById], references: [id])
-  createdAt DateTime     @default(now())
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId     String       @db.Uuid
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  oldStatus   OrderStatus?
+  newStatus   OrderStatus
+  changedById String       @db.Uuid
+  user        User         @relation(fields: [changedById], references: [id])
+  createdAt   DateTime     @default(now())
 
   @@index([orderId])
   @@index([changedById])
 }
 
 model Payment {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orderId   String   @unique @db.Uuid
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  transactionId String?  @unique
-  provider    String?  // telebirr, cbe
-  status      PaymentStatus @default(AWAITING_PAYMENT)   
-  apiResponse String?  @db.Text
-  amount    Decimal  @db.Decimal(10, 2)
-  deliveryFee Decimal  @db.Decimal(10, 2)
-  serviceFee Decimal  @db.Decimal(10, 2)
-  tip        Decimal  @db.Decimal(10, 2)
-  refundReason String?  @db.Text
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId           String        @unique @db.Uuid
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  transactionId     String?       @unique
+  provider          String? // telebirr, cbe
+  status            PaymentStatus @default(AWAITING_PAYMENT)
+  apiResponse       String?       @db.Text
+  amount            Decimal       @db.Decimal(10, 2)
+  deliveryFee       Decimal       @db.Decimal(10, 2)
+  serviceFee        Decimal       @db.Decimal(10, 2)
+  tip               Decimal       @db.Decimal(10, 2)
+  refundReason      String?       @db.Text
   webhookReceivedAt DateTime?
-  payoutAmount Decimal  @db.Decimal(10, 2)
-  attempts    Int      @default(1)
-  createdAt DateTime @default(now())
+  payoutAmount      Decimal       @db.Decimal(10, 2)
+  attempts          Int           @default(1)
+  createdAt         DateTime      @default(now())
 }
-
 
 model Rating {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  raterId    String   @db.Uuid
+  raterId   String   @db.Uuid
   user      User     @relation("RatingsGiven", fields: [raterId], references: [id], onDelete: Cascade)
-  rateeId    String   @db.Uuid
+  rateeId   String   @db.Uuid
   ratedUser User     @relation("RatingsReceived", fields: [rateeId], references: [id], onDelete: Cascade)
   orderId   String   @unique @db.Uuid
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -423,7 +420,7 @@ model Notification {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
   message   String   @db.Text
-  sentAt   DateTime @default(now())
+  sentAt    DateTime @default(now())
   delivered Boolean  @default(false)
   createdAt DateTime @default(now())
 
@@ -431,19 +428,19 @@ model Notification {
 }
 
 model LedgerEntry {
-  id        String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orderId   String                @db.Uuid
-  userId    String?               @db.Uuid // Nullable: Revenue belongs to system
-  amount    Decimal               @db.Decimal(10, 2)
-  type      LedgerTransactionType
-  status    LedgerEntryStatus     @default(PENDING)
+  id          String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId     String                @db.Uuid
+  userId      String?               @db.Uuid // Nullable: Revenue belongs to system
+  amount      Decimal               @db.Decimal(10, 2)
+  type        LedgerTransactionType
+  status      LedgerEntryStatus     @default(PENDING)
   description String?               @db.Text
-  reference String?               @unique
-  createdAt DateTime              @default(now())
+  reference   String?               @unique
+  createdAt   DateTime              @default(now())
 
   // Relations
-  order     Order @relation(fields: [orderId], references: [id])
-  user      User? @relation(fields: [userId], references: [id])
+  order Order @relation(fields: [orderId], references: [id])
+  user  User? @relation(fields: [userId], references: [id])
 
   @@index([orderId])
   @@index([userId])
@@ -456,7 +453,7 @@ model Dispute {
   raisedById      String        @db.Uuid
   assignedAdminId String?       @db.Uuid
   reason          String        @db.Text
-  evidence       String?       @db.Text
+  evidence        String?       @db.Text
   status          DisputeStatus @default(OPEN)
   resolution      String?       @db.Text
   createdAt       DateTime      @default(now())
