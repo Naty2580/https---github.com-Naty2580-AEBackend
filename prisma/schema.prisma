@@ -436,6 +436,7 @@ model LedgerEntry {
   status      LedgerEntryStatus     @default(PENDING)
   description String?               @db.Text
   reference   String?               @unique
+  transferRef String?               @unique
   createdAt   DateTime              @default(now())
 
   // Relations
