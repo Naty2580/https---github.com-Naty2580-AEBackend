@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { PaymentController } from './payment.controller.js';
+import {protect} from '../../api/middlewares/auth.middleware.js'
 
 const router = Router();
 const PaymentController = new PaymentController();
 
-router.post('/initialize', /* requireAuth */ PaymentController.initialize)
+router.post('/initialize', /* requireAuth */ protect, PaymentController.initialize)
 
 router.post('/webhook/chapa', PaymentController.chapaWebhook)
 

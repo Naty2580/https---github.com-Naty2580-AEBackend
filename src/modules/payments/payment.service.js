@@ -70,4 +70,54 @@ export class PaymentService {
       );
     });
   }
+
+  async disimburseDelivererPayout(orderId) {
+
+    const order = await prisma.order.findUnique({
+      where: {id: orderId},
+      include: {
+        deliverer: {
+          inclide: { user: true }
+        }
+      }
+    })
+
+    if (!order.deliverer || !order.deliverer.payoutAccount) {
+      console.warn(`Can not payout Order ${orderId}: Deliverer missing or has not payout account`)
+      return
+    }
+
+    const payoutAmount = Number(order.foodPrice) + Number(order.deliveryFee) + Number(order.tip)
+
+    const transferRef = `AE-PAYOUT-${crypto.randomBytes(6).toString('hex')}`
+
+    const payoutData = {
+      accountName: order.deliverer.user.fullname,
+      accountNumber: order.deliverer.payoutAccount,
+      amount: payoutAmount.toString(),
+      currency: 'ETB',
+      reference: transferRef,
+      bank_code: order.deliverer.payoutProvider,
+    }
+
+    try {
+      await chapaAdapter.transferFunds(payoutData)
+
+      await prisma.$transaction(async (tx) => {
+        await this.ledgerService.processFinancialEvent(
+          order,
+          'REIMBURSEMENT_PAYMENT',
+          payoutAmount,
+          order.deliverer.userId,
+          tx
+        )
+        await tx.ledgerEntry.updateMany({
+          where: {type: 'REIMBURSEMENT_PAYMENT', orderId: orderId},
+          data: {transferRef}
+        })
+      })
+    } catch (error) {
+      console.error('Failed to disburse deliverer pay', error);
+    }
+  }
 }
