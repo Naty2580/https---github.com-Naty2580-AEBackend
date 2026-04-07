@@ -1,22 +1,25 @@
 import { Router } from 'express';
-import { verifyChapaSignature } from '../../infrastructure/payment/chapa.adapter.js';
-import { PaymentService } from './payment.service.js';
+import { PaymentController } from './payment.controller.js';
 
 const router = Router();
-const paymentService = new PaymentService();
+const PaymentController = new PaymentController();
 
-router.post('/webhook/chapa', async (req, res) => {
-  const signature = req.headers['x-chapa-signature'];
-  if (!verifyChapaSignature(signature, req.body)) {
-    return res.status(401).send('Invalid signature');
-  }
+router.post('/initialize', /* requireAuth */ PaymentController.initialize)
 
-  const { tx_ref, status } = req.body;
-  if (status === 'success') {
-    await paymentService.handlePaymentSuccess(req.body.id, tx_ref);
-  }
+router.post('/webhook/chapa', PaymentController.chapaWebhook)
 
-  res.status(200).send('Webhook Received');
-});
+// router.post('/webhook/chapa', async (req, res) => {
+//   const signature = req.headers['x-chapa-signature'];
+//   if (!verifyChapaSignature(signature, req.body)) {
+//     return res.status(401).send('Invalid signature');
+//   }
+
+//   const { tx_ref, status } = req.body;
+//   if (status === 'success') {
+//     await paymentService.handlePaymentSuccess(req.body.id, tx_ref);
+//   }
+
+//   res.status(200).send('Webhook Received');
+// });
 
 export default router;
