@@ -3,6 +3,9 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 
+import swaggerUi from 'swagger-ui-express'
+import { swaggerDocs } from '../config/swagger.config.js';
+
 import cors from 'cors';
 
 import v1Routes from './routes.v1.js';
@@ -29,6 +32,9 @@ app.use(cors({
 app.use(express.json({ limit: '1mb' })); // Prevent large payload DOS attacks
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
+
+// serve the swagger api docimentation ui
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs))
 
 // 2. API Routing
 app.use('/api/v1', v1Routes);

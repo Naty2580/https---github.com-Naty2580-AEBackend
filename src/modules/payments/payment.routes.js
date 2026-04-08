@@ -5,6 +5,30 @@ import {protect} from '../../api/middlewares/auth.middleware.js'
 const router = Router();
 const PaymentController = new PaymentController();
 
+/**
+ * @openapi
+ * /payments/initialize:
+ *   post:
+ *     summary: Initialize a new Chapa Payment Session
+ *     description: Returns a checkout URL for the customer to finalize payment via Chapa.
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               orderId:
+ *                 type: string
+ *                 description: The unique ID of the order being paid for
+ *                 example: "123e4567-e89b-12d3-a456-426614174000"
+ *     responses:
+ *       200:
+ *         description: Successfully initialized transaction
+ *       400:
+ *         description: Order not found or not in payable state
+ */
 router.post('/initialize', /* requireAuth */ protect, PaymentController.initialize)
 
 router.post('/webhook/chapa', PaymentController.chapaWebhook)
