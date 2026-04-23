@@ -10,7 +10,7 @@ export const globalErrorHandler = (err, req, res, next) => {
   let error = err;
 
   // Fallback default values
-  let statusCode = error.statusCode || 500;
+  let statusCode = error.statusCode || 500; 
   let message = error.message || 'Internal Server Error';
 
   // Handle specific known errors that don't extend AppError (e.g., Prisma, JWT)

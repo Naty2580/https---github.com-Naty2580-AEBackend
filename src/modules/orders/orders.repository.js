@@ -10,13 +10,106 @@ export class OrderRepository {
     });
   }
 
-  async findById(id) {
+  async transitionOrderStatus(id, currentStatus, newStatus, changedById) {
+    try {
+      return await prisma.$transaction([
+        prisma.order.update({
+          // The Magic: We mandate the currentStatus in the WHERE clause.
+          // If a concurrent request already changed it, this throws a RecordNotFound error.
+          where: {
+            id,
+            status: currentStatus
+          },
+          data: { status: newStatus }
+        }),
+        prisma.orderStatusHistory.create({
+          data: { orderId: id, newStatus, changedById }
+        })
+      ]);
+    } catch (error) {
+      // Prisma throws P2025 if the WHERE clause fails to find a match
+      if (error.code === 'P2025') {
+        throw new Error('STATE_CONFLICT');
+      }
+      throw error;
+    }
+  }
+
+  async findById(id){
     return await prisma.order.findUnique({
       where: { id },
-      include: { items: true, statusHistory: true }
+      include: {
+        items: {
+          select: {
+            id: true, quantity: true, unitPrice: true,
+            product: { select: { name: true, imageUrl: true } }
+          }
+        },
+        restaurant: { select: { name: true, location: true, mode: true, phone: true, lat: true, lng: true } },
+        customer: {
+          select: {
+            defaultLocation: true, rating: true,
+            user: { select: { fullName: true, phoneNumber: true } }
+          }
+        },
+        deliverer: {
+          select: {
+            rating: true,
+            user: { select: { fullName: true, phoneNumber: true, avatarUrl: true } }
+          }
+        },
+        statusHistory: {
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, oldStatus: true, newStatus: true, createdAt: true }
+        }
+      }
     });
   }
 
+  async createOrderWithItems(orderData, itemsData) {
+    return await prisma.$transaction(async (tx) => {
+      // 1. Create the Order
+      const order = await tx.order.create({
+        data: {
+          shortId: orderData.shortId,
+          customerId: orderData.customerId,
+          restaurantId: orderData.restaurantId,
+          foodPrice: orderData.foodPrice,
+          deliveryFee: orderData.deliveryFee,
+          serviceFee: orderData.serviceFee,
+          transactionFee: 0.00, // Determined later by payment gateway
+          tip: orderData.tip,
+          totalAmount: orderData.totalAmount,
+          payoutAmount: orderData.payoutAmount,
+          status: 'CREATED',
+          paymentStatus: 'AWAITING_PAYMENT',
+          otpCode: orderData.otpCode,
+
+          // 2. Nested write for Order Items
+          items: {
+            create: itemsData.map(item => ({
+              menuId: item.menuId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice
+            }))
+          },
+
+          // 3. Nested write for Status History initialization
+          statusHistory: {
+            create: {
+              newStatus: 'CREATED',
+              changedById: orderData.customerId
+            }
+          }
+        },
+        include: {
+          items: true,
+          restaurant: { select: { name: true, location: true, mode: true, phone: true } }
+        }
+      });
+      return order;
+    });
+  }
 
 
   async atomicAssignOrder(orderId, delivererId) {
@@ -26,7 +119,7 @@ export class OrderRepository {
         where: { id: orderId },
         select: { id: true, status: true, assignedDelivererId: true },
         // The magic: FOR UPDATE
-        _lock: 'update' 
+        _lock: 'update'
       });
 
       // 2. Strict Business Logic Verification
@@ -48,4 +141,254 @@ export class OrderRepository {
       });
     });
   }
+
+  async fetchActiveMenuItems(restaurantId, menuIds) {
+    return await prisma.menuItem.findMany({
+      where: {
+        restaurantId,
+        id: { in: menuIds },
+        isAvailable: true,
+        isArchived: false
+      },
+      select: { id: true, price: true, name: true, isFasting: true }
+    });
+  }
+
+  async updateStatus(id, newStatus, changedById) {
+    return await prisma.$transaction([
+      prisma.order.update({
+        where: { id },
+        data: { status: newStatus }
+      }),
+      prisma.orderStatusHistory.create({
+        data: { orderId: id, newStatus, changedById }
+      })
+    ]);
+  }
+
+  async findAllOrders({ skip, take, status, roleAs, userId, restaurantId }) {
+    const where = {};
+    if (status) where.status = status;
+
+    // Apply strict access boundaries based on the requested perspective
+    if (roleAs === 'CUSTOMER') {
+      where.customerId = userId;
+    } else if (roleAs === 'DELIVERER') {
+      where.assignedDelivererId = userId;
+    } else if (roleAs === 'VENDOR') {
+      if (!restaurantId) throw new Error("restaurantId is required for Vendor views");
+      where.restaurantId = restaurantId;
+    }
+    // ADMIN sees all, no boundary applied
+
+    const [total, orders] = await prisma.$transaction([
+      prisma.order.count({ where }),
+      prisma.order.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          shortId: true,
+          status: true,
+          totalAmount: true,
+          createdAt: true,
+          restaurant: { select: { name: true } },
+          customer: { select: { user: { select: { fullName: true } } } },
+          // Count items instead of fetching full payload
+          _count: { select: { items: true } }
+        }
+      })
+    ]);
+
+    return { total, orders };
+  }
+
+  async markCustomerReceived(orderId, customerId) {
+    return await prisma.$transaction([
+      prisma.order.update({
+        where: { id: orderId },
+        data: { status: 'RECEIVED' } // State machine will auto-bump to COMPLETED if Deliverer is done
+      }),
+      prisma.orderStatusHistory.create({
+        data: { orderId, newStatus: 'RECEIVED', changedById: customerId }
+      })
+    ]);
+  }
+
+  async markCustomerReceivedOCC(orderId, currentStatus, customerId) {
+    try {
+      return await prisma.$transaction([
+        prisma.order.update({
+          where: { id: orderId, status: currentStatus },
+          data: { status: 'RECEIVED' }
+        }),
+        prisma.orderStatusHistory.create({
+          data: { orderId, newStatus: 'RECEIVED', changedById: customerId }
+        })
+      ]);
+    } catch (error) {
+      if (error.code === 'P2025') throw new Error('STATE_CONFLICT');
+      throw error;
+    }
+  }
+
+  async dropDelivererAssignment(orderId, currentStatus, delivererId, reason) {
+    try {
+      return await prisma.$transaction([
+        prisma.order.update({
+          where: { id: orderId, status: currentStatus },
+          data: { 
+            status: 'AWAITING_ACCEPT', 
+            assignedDelivererId: null 
+          }
+        }),
+        prisma.orderStatusHistory.create({
+          data: { orderId, newStatus: 'AWAITING_ACCEPT', changedById: delivererId }
+        }),
+        // Log the drop as a DECLINED action to calculate penalty metrics later
+        prisma.dispatchLog.create({
+          data: {
+            orderId,
+            delivererId,
+            action: 'DECLINED'
+          }
+        })
+      ]);
+    } catch (error) {
+      if (error.code === 'P2025') throw new Error('STATE_CONFLICT');
+      throw error;
+    }
+  }
+
+  /**
+   * REFINED: Hard-shifts an order to DISPUTED to freeze escrow funds.
+   */
+  async markDisputed(orderId, currentStatus, raisedById, reason) {
+    try {
+      return await prisma.$transaction([
+        prisma.order.update({
+          where: { id: orderId, status: currentStatus },
+          data: { status: 'DISPUTED' }
+        }),
+        prisma.orderStatusHistory.create({
+          data: { orderId, newStatus: 'DISPUTED', changedById: raisedById }
+        }),
+        prisma.dispute.create({
+          data: {
+            orderId,
+            raisedById,
+            reason,
+            status: 'OPEN'
+          }
+        })
+      ]);
+    } catch (error) {
+      if (error.code === 'P2025') throw new Error('STATE_CONFLICT');
+      throw error;
+    }
+  }
+
+ async cancelOrderOCC(orderId, currentStatus, actorId, reason) {
+    try {
+      return await prisma.$transaction([
+        prisma.order.update({
+          where: { id: orderId, status: currentStatus },
+          data: { status: 'CANCELLED' }
+        }),
+        prisma.orderStatusHistory.create({
+          data: { 
+            orderId, 
+            newStatus: 'CANCELLED', 
+            changedById: actorId,
+            // You can optionally add a 'reason' column to orderStatusHistory in schema later
+            // For now, it's just recorded in the audit logs or handled by the caller
+          }
+        })
+      ]);
+    } catch (error) {
+      if (error.code === 'P2025') throw new Error('STATE_CONFLICT');
+      throw error;
+    }
+  }
+
+    async finalizeOrderAndTriggerPayout(orderId, expectedCurrentStatus, actorId, payoutService) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const [order] = await tx.$queryRaw`
+          SELECT id, status, "payoutAmount", "assignedDelivererId" 
+          FROM "Order" 
+          WHERE id = ${orderId}::uuid 
+          FOR UPDATE;
+        `;
+
+        if (!order) throw new Error('NOT_FOUND');
+        if (order.status !== expectedCurrentStatus) throw new Error('STATE_CONFLICT');
+
+        const updatedOrder = await tx.order.update({
+          where: { id: orderId },
+          data: { status: 'COMPLETED' }
+        });
+
+        await tx.orderStatusHistory.create({
+          data: { orderId, newStatus: 'COMPLETED', changedById: actorId }
+        });
+
+        // REFINED: Delegate to the robust Payout Engine
+        await payoutService.executeDelivererPayout(updatedOrder, tx);
+
+        return updatedOrder;
+      });
+    } catch (error) {
+      if (error.message === 'STATE_CONFLICT') throw new Error('STATE_CONFLICT');
+      throw error;
+    }
+  }
+
+   async findActiveDelivery(delivererId) {
+    const activeStates = [
+      'ASSIGNED', 'AWAITING_PAYMENT', 'PAYMENT_RECEIVED',
+      'VENDOR_BEING_PREPARED', 'VENDOR_READY_FOR_PICKUP',
+      'PICKED_UP', 'EN_ROUTE', 'ARRIVED', 'RECEIVED'
+    ];
+
+    return await prisma.order.findFirst({
+      where: {
+        assignedDelivererId: delivererId,
+        status: { in: activeStates }
+      },
+      include: {
+        restaurant: { select: { name: true, location: true, phone: true, lat: true, lng: true } },
+        customer: { 
+          select: { 
+            defaultDormBlock: true, 
+            user: { select: { fullName: true, phoneNumber: true } } 
+          } 
+        },
+        items: { select: { quantity: true, product: { select: { name: true } } } }
+      }
+    });
+  }
+
+  /**
+   * NEW: Kitchen Queue for Vendors
+   * Returns un-paginated, active orders sorted by creation time (oldest first)
+   */
+  async getKitchenQueue(restaurantId) {
+    const kitchenStates = ['PAYMENT_RECEIVED', 'VENDOR_BEING_PREPARED'];
+
+    return await prisma.order.findMany({
+      where: {
+        restaurantId,
+        status: { in: kitchenStates }
+      },
+      orderBy: { createdAt: 'asc' }, // Oldest orders at the top of the screen
+      include: {
+        items: { select: { quantity: true, product: { select: { name: true } } } },
+        deliverer: { select: { user: { select: { fullName: true } } } }
+      }
+    });
+  }
+  
 }

@@ -87,8 +87,6 @@ if (data.mode === 'ADMIN_MANAGED' && restaurant.mode === 'VENDOR_MANAGED') {
   async listRestaurants(query) {
     let bounds = null;
 
-    
-
     // 1. Prepare Bounding Box for DB Pruning
     if (query.userLat !== undefined && query.userLng !== undefined) {
       bounds = {

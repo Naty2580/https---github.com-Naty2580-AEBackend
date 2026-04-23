@@ -7,6 +7,9 @@ import * as menuController from '../modules/menus/menu.controller.js';
 import { validate } from '../api/middlewares/validate.middleware.js';
 import { queryMenuItemsSchema } from '../modules/menus/menu.dto.js';
 import { protect } from '../api/middlewares/auth.middleware.js';
+import orderRoutes from '../modules/orders/order.routes.js';
+import dispatchRoutes from '../modules/dispatch/dispatch.routes.js';
+import paymentRoutes from '../modules/payments/payment.routes.js'
 
 
 const router = express.Router();
@@ -23,7 +26,11 @@ router.get('/health', (req, res) => {
 router.use('/users', userRoutes);
 router.use('/auth', authRoutes);
 router.use('/restaurants', restaurantRoutes);
-router.use('/restaurants/:restaurantId', menuRoutes);
+router.use('/restaurants/:restaurantId', menuRoutes); 
+
+router.use('/orders', orderRoutes);
+router.use('/dispatch', dispatchRoutes);
+router.use('/payments', paymentRoutes);
 
 // Global menu search endpoint (no restaurantId in path)
 router.get(

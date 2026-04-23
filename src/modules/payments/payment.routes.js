@@ -1,10 +1,20 @@
 import { Router } from 'express';
 import { verifyChapaSignature } from '../../infrastructure/payment/chapa.adapter.js';
 import { PaymentService } from './payment.service.js';
+import * as paymentController from './payment.controller.js';
+import { protect } from '../../api/middlewares/auth.middleware.js'
 
 const router = Router();
 const paymentService = new PaymentService();
 
+// ==========================================
+// INTERNAL APP ROUTES (Requires Auth)
+// ==========================================
+router.post('/checkout/:orderId', protect, paymentController.initiateCheckout);
+
+// ==========================================
+// EXTERNAL WEBHOOKS (Public, secured by Cryptographic Signature)
+// ==========================================
 router.post('/webhook/chapa', async (req, res) => {
   const signature = req.headers['x-chapa-signature'];
   if (!verifyChapaSignature(signature, req.body)) {
@@ -13,7 +23,7 @@ router.post('/webhook/chapa', async (req, res) => {
 
   const { tx_ref, status } = req.body;
   if (status === 'success') {
-    await paymentService.handlePaymentSuccess(req.body.id, tx_ref);
+    await paymentService.handlePaymentSuccess(tx_ref, req.body.id);
   }
 
   res.status(200).send('Webhook Received');
