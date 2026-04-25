@@ -1,6 +1,7 @@
-import { chapaAdapter } from "../../infrastructure/payment/chapa.adapter"
-import { PaymentService } from "./payment.service"
+import { chapaAdapter } from "../../infrastructure/payment/chapa.adapter.js"
+import { PaymentService } from "./payment.service.js"
 
+const paymentService = new PaymentService()
 
 export class PaymentController {
 
@@ -9,7 +10,7 @@ export class PaymentController {
             const { orderId } = req.body
             const user = req.user
 
-            const checkout_url = await PaymentService.initializePayment(orderId, user)
+            const checkout_url = await paymentService.initializePayment(orderId, user)
             res.status(200).json({success: true, url: checkout_url})
         } catch (error) {
             next(error)
@@ -27,7 +28,7 @@ export class PaymentController {
             const {tx_ref, status} = req.body
 
             if (status === 'success') {
-                await PaymentService.handlePaymentSuccess(tx_ref)
+                await paymentService.handlePaymentSuccess(tx_ref)
             }
 
             res.status(200).send('Webhook Recieved')

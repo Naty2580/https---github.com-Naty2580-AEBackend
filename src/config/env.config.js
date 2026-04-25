@@ -24,8 +24,8 @@ const envSchema = z.object({
   EMAIL_FROM: z.email(),
   
   // Financial & Third-Party APIs (Chapa, Telebirr, etc.)
-  CHAPA_SECRET_KEY: z.string().min(1, "CHAPA_SECRET_KEY is required for payments"),
-  CHAPA_WEBHOOK_SECRET: z.string().min(1, "CHAPA_WEBHOOK_SECRET is required"),
+  CHAPA_SECRET_KEY: z.string().min(1),
+  CHAPA_WEBHOOK_SECRET: z.string().min(1),
   
   // Redis / Queues (Required for 5-min Escrow Timeout & PostGIS)
   REDIS_URL: z.string().url("REDIS_URL must be a valid connection string").optional(),

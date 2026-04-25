@@ -3,7 +3,7 @@ import { PaymentController } from './payment.controller.js';
 import {protect} from '../../api/middlewares/auth.middleware.js'
 
 const router = Router();
-const PaymentController = new PaymentController();
+const paymentController = new PaymentController();
 
 /**
  * @openapi
@@ -29,9 +29,9 @@ const PaymentController = new PaymentController();
  *       400:
  *         description: Order not found or not in payable state
  */
-router.post('/initialize', /* requireAuth */ protect, PaymentController.initialize)
+router.post('/initialize', protect, paymentController.initialize)
 
-router.post('/webhook/chapa', PaymentController.chapaWebhook)
+router.post('/webhook/chapa', paymentController.chapaWebhook)
 
 // router.post('/webhook/chapa', async (req, res) => {
 //   const signature = req.headers['x-chapa-signature'];

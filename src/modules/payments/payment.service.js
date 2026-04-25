@@ -1,7 +1,8 @@
 import { email } from 'zod';
 import prisma from '../../infrastructure/database/prisma.client.js';
 import { LedgerService } from '../ledger/ledger.service.js';
-import chapaAdapter from '../../infrastructure/payment/chapa.adapter.js'
+import {chapaAdapter} from '../../infrastructure/payment/chapa.adapter.js'
+import crypto from 'node:crypto'
 
 export class PaymentService {
   constructor() {
@@ -13,17 +14,17 @@ export class PaymentService {
       where: {id: orderId}
     })
 
-    if (!order) {
-      throw new Error('Order not found')
-    }
-    if (order.status !=='CREATED' && order.status !== 'AWAITING_PAYMENT') {
-      throw new Error('Order is not in a state to be paid for')
-    }
+    // if (!order) {
+    //   throw new Error('Order not found')
+    // }
+    // if (order.status !=='CREATED' && order.status !== 'AWAITING_PAYMENT') {
+    //   throw new Error('Order is not in a state to be paid for')
+    // }
 
     const txRef = `AE-TX${crypto.randomBytes(8).toString('hex')}`
 
     const chapaData = {
-      amount: order.totalAmount.toString(),
+      amount: /* order.totalAmount.toString() */ 100,
       currency: 'ETB',
       email: user.email || 'customer@astu.edu.et',
       first_name: user.fullname,
@@ -32,12 +33,12 @@ export class PaymentService {
       // callback_url: `${process.env.BASE_URL}/api/v1/payments/verify`
     }
 
-    const chapaResponse = await chapaAdapter.initializePayment(chapaData)
+    const chapaResponse = await chapaAdapter.initializeTransaction(chapaData)
 
-    await prisma.order.update({
-      where: {id: orderId},
-      data: { chapaRef: txRef }
-    })
+    // await prisma.order.update({
+    //   where: {id: orderId},
+    //   data: { chapaRef: txRef }
+    // })
 
     return chapaResponse.data.checkout_url
   }
@@ -77,7 +78,7 @@ export class PaymentService {
       where: {id: orderId},
       include: {
         deliverer: {
-          inclide: { user: true }
+          include: { user: true }
         }
       }
     })
