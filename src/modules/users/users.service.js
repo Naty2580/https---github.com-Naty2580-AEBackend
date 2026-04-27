@@ -294,9 +294,19 @@ export class UserService {
 
   async selfDeactivate(userId, password) {
     const user = await this.userRepository.findById(userId);
-    const isValid = await bcrypt.compare(password, user.password);
     
-    if (!isValid) throw new UnauthorizedError('Invalid password confirmation.');
+    // If registered via Telegram Mini-App auto-auth, bypass password check
+    if (user.password !== 'NO_PASSWORD_TELEGRAM_OAUTH') {
+      if (!password) throw new UnauthorizedError('Password is required for deactivation.');
+      const isValid = await bcrypt.compare(password, user.password);
+      if (!isValid) throw new UnauthorizedError('Invalid password confirmation.');
+    }
+
+    // Existing safety check (Cannot deactivate if holding active orders or disputes)
+    const canDeactivate = await this.userRepository.canDeactivate(userId);
+    if (!canDeactivate) {
+      throw new BusinessLogicError("Cannot deactivate account while you have active orders or unresolved disputes.");
+    }
 
     await this.userRepository.deactivate(userId);
   }

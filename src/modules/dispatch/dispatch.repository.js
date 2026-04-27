@@ -157,4 +157,15 @@ export class DispatchRepository {
     };
   }
 
+  async updateLiveLocation(delivererId, lat, lng) {
+    return await prisma.delivererProfile.update({
+      where: { userId: delivererId },
+      data: {
+        lat,
+        lng,
+        lastPingAt: new Date()
+      }
+    });
+  }
+
 }

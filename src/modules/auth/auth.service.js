@@ -5,7 +5,7 @@ import { UnauthorizedError, ConflictError, BusinessLogicError, NotFoundError, Fo
 import { AUTH_ERRORS } from '../../core/errors/error.codes.js';
 import { generateAccessToken, generateRefreshToken } from '../../core/utils/token.utils.js';
 import { emailAdapter } from '../../infrastructure/email/email.adapter.js';
-import { only } from 'node:test';
+import { TelegramAdapter } from '../../infrastructure/telegram/telegram.adapter.js';
 
 const mockSendSMS = async (phone, otp) => {
   console.log(`[SMS MOCK] To: ${phone} | OTP: ${otp}`);
@@ -154,6 +154,63 @@ export class AuthService {
     return {
       accessToken,
       refreshToken, user 
+    };
+  }
+
+  async telegramLogin(initData) {
+    let telegramUser;
+    try {
+      // 1. Cryptographically verify the payload belongs to our specific Bot
+      telegramUser = TelegramAdapter.verifyInitData(initData);
+    } catch (error) {
+      throw new UnauthorizedError(`Telegram Authentication Failed: ${error.message}`);
+    }
+
+    if (!telegramUser || !telegramUser.id) {
+      throw new UnauthorizedError('Telegram user data could not be extracted.');
+    }
+
+    // 2. Find user in Database
+    let user = await prisma.user.findUnique({
+      where: { telegramId: BigInt(telegramUser.id) }
+    });
+
+    // 3. Auto-Registration (If user doesn't exist, create a skeleton CUSTOMER profile)
+    if (!user) {
+      user = await prisma.$transaction(async (tx) => {
+        const newUser = await tx.user.create({
+          data: {
+            telegramId: BigInt(telegramUser.id),
+            // Placeholder fields until they complete profile via /users/me/profile
+            fullName: `${telegramUser.first_name} ${telegramUser.last_name || ''}`.trim(),
+            phoneNumber: `UNKNOWN_${telegramUser.id}`, 
+            password: 'NO_PASSWORD_TELEGRAM_OAUTH', // Impossible to login via standard route
+            role: 'CUSTOMER',
+            activeMode: 'CUSTOMER',
+            isEmailVerified: false,
+            isPhoneVerified: false,
+          }
+        });
+
+        await tx.customerProfile.create({ data: { userId: newUser.id } });
+        return newUser;
+      });
+    }
+
+    // 4. Standard Status Checks
+    if (user.status !== 'ACTIVE') throw new BusinessLogicError(AUTH_ERRORS.USER_BANNED);
+
+    // 5. Issue Standard Tokens
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken();
+
+    await this.authRepository.storeRefreshToken(user.id, refreshToken);
+
+    return {
+      accessToken,
+      refreshToken,
+      user: { id: user.id, fullName: user.fullName, role: user.role },
+      isProfileComplete: user.phoneNumber !== `UNKNOWN_${telegramUser.id}` // Hint to frontend to prompt for details
     };
   }
 

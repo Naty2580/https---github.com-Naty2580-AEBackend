@@ -65,6 +65,22 @@ export const login = async (req, res, next) => {
   }
 };
 
+export const telegramLogin = async (req, res, next) => {
+  try {
+    const { initData } = req.body;
+    const { accessToken, refreshToken, user, isProfileComplete } = await authService.telegramLogin(initData);
+
+    res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS);
+
+    res.status(200).json({
+      success: true,
+      data: { accessToken, user, isProfileComplete }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const refresh = async (req, res, next) => {
   try {
     const token = req.cookies?.refreshToken;

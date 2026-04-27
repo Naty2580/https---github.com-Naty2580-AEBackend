@@ -36,6 +36,8 @@ export class OrderTimeoutService {
       } catch (error) {
         if (error.code !== 'P2025') console.error(`🔥 [TIMEOUT ERROR]:`, error);
       }
+
+      timer.unref();
     }, TIMEOUT_MS);
   }
 
@@ -72,6 +74,8 @@ export class OrderTimeoutService {
       } catch (error) {
         if (error.code !== 'P2025') console.error(`🔥 [TIMEOUT ERROR]:`, error);
       }
+
+      timer.unref();
     }, TIMEOUT_MS);
   }
 

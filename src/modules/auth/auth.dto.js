@@ -24,6 +24,12 @@ export const loginSchema = z.object({
   })
 });
 
+export const telegramLoginSchema = z.object({
+  body: z.object({
+    initData: z.string().min(10, "Telegram initData is required")
+  })
+});
+
 export const registerSchema = z.object({
   body: z.object({
     telegramId: z.coerce.bigint(),

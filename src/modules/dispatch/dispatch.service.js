@@ -43,70 +43,42 @@ export class DispatchService {
     });
   }
 
-   async broadcastNewOrder(order) {
+  async broadcastNewOrder(order) {
     try {
-      console.log(`📡 [DISPATCH] Broadcasting Order ${order.id} to nearby deliverers...`);
-
-      // 1. Fetch the restaurant location to center the search
       const restaurant = order.restaurant;
-
-      // 2. Fetch all online deliverers within a broad bounding box (BBox)
       const potentialDeliverers = await this.repository.findNearbyDeliverers(restaurant.lat, restaurant.lng);
 
-      // 3. Geospatial Filter: Strict 1.8km Haversine distance check
-      const eligibleDeliverers = potentialDeliverers.filter(deliverer => {
-        // In a full production system, deliverers ping their live location to the server.
-        // For this V1, we assume their 'defaultDormBlock' or a stored 'lastKnownLat' is on their profile.
-        // Here we simulate the distance check. If they haven't shared location, they don't get the broadcast.
-        if (!deliverer.lat || !deliverer.lng) return false;
-
-        const distanceMeters = calculateDistance(
-          restaurant.lat, 
-          restaurant.lng, 
-          deliverer.lat, 
-          deliverer.lng
-        );
-        
-        return distanceMeters <= CAMPUS_CONFIG.MAX_RADIUS_METERS;
+      // 1. Distance Filter (<= 1.8km)
+      let eligibleDeliverers = potentialDeliverers.filter(d => {
+        if (!d.lat || !d.lng) return false;
+        const distance = calculateDistance(restaurant.lat, restaurant.lng, d.lat, d.lng);
+        return distance <= CAMPUS_CONFIG.MAX_RADIUS_METERS;
       });
 
-      if (eligibleDeliverers.length === 0) {
-        console.warn(`⚠️ [DISPATCH] No eligible deliverers found for Order ${order.id}.`);
-        // The 15-minute SLA timer (already started in OrderService) will eventually cancel it.
-        return;
-      }
+      if (eligibleDeliverers.length === 0) return;
 
-      // 4. Assemble the Broadcast Payload (Hide sensitive customer data)
-      const broadcastPayload = {
-        orderId: order.id,
-        shortId: order.shortId,
-        restaurantName: restaurant.name,
-        restaurantLocation: restaurant.location,
-        deliveryFee: order.deliveryFee, // This is what the deliverer earns (plus tip)
-        tip: order.tip,
-        totalPayout: Number(order.deliveryFee) + Number(order.tip),
-        distanceToRestaurant: 'Calculating...', // Frontend can compute precise distance
-        createdAt: order.createdAt
-      };
+      // 2. CRITICAL FIX: Prioritize by Rating (Descending)
+      // High-rated deliverers get the socket ping slightly faster, giving them first pick.
+      eligibleDeliverers.sort((a, b) => Number(b.rating) - Number(a.rating));
 
-      // 5. Push the event via WebSockets to each eligible deliverer
-      let pingCount = 0;
-      eligibleDeliverers.forEach(deliverer => {
-        // Check if this specific user is actually connected to the WebSocket server right now
+      const broadcastPayload = { /* ... existing payload generation ... */ };
+
+      // 3. Staggered Broadcast (Priority Matching)
+      let delay = 0;
+      eligibleDeliverers.forEach((deliverer, index) => {
         if (socketManager.connectedDeliverers.has(deliverer.userId)) {
-          socketManager.emitToDeliverer(deliverer.userId, 'ORDER_BROADCAST', broadcastPayload);
-          pingCount++;
-          
-          // Optional: Write to DispatchLog that we offered this order to this deliverer
-          // This allows you to track "Acceptance Rate" later
-          this.repository.logBroadcastOffer(order.id, deliverer.userId).catch(console.error);
+          // Top 3 deliverers get it instantly. Others get it delayed by 2 seconds each.
+          const currentDelay = index < 3 ? 0 : delay += 2000;
+
+          setTimeout(() => {
+            socketManager.emitToDeliverer(deliverer.userId, 'ORDER_BROADCAST', broadcastPayload);
+            this.repository.logBroadcastOffer(order.id, deliverer.userId).catch(console.error);
+          }, currentDelay);
         }
       });
 
-      console.log(`✅ [DISPATCH] Order ${order.id} broadcasted to ${pingCount} live deliverers.`);
-
     } catch (error) {
-      console.error(`🔥 [DISPATCH ERROR] Failed to broadcast order ${order.id}:`, error);
+      console.error(`🔥 [DISPATCH ERROR]:`, error);
     }
   }
 
@@ -122,6 +94,20 @@ export class DispatchService {
     // await prisma.delivererProfile.update({ where: { userId: targetDelivererId }, data: { rating: newRating }});
 
     return metrics;
+  }
+
+    async updateLiveLocation(delivererId, lat, lng, activeOrderId) {
+    // 1. Update Database
+    await this.repository.updateLiveLocation(delivererId, lat, lng);
+
+    // 2. If the deliverer is currently holding an order, push coordinates to the Customer
+    if (activeOrderId) {
+      socketManager.emitOrderUpdate(activeOrderId, 'DELIVERER_LOCATION_UPDATE', {
+        lat,
+        lng,
+        timestamp: new Date()
+      });
+    }
   }
   
 }

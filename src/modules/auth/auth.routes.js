@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as authController from './auth.controller.js';
 import { validate } from '../../api/middlewares/validate.middleware.js';
-import { loginSchema, registerSchema, verifyEmailSchema, resendVerificationSchema ,forgotPasswordSchema, resetPasswordSchema, registerVendorSchema, verifyPhoneSchema } from './auth.dto.js';
+import { loginSchema, registerSchema, verifyEmailSchema, resendVerificationSchema ,forgotPasswordSchema, resetPasswordSchema, registerVendorSchema, verifyPhoneSchema, telegramLoginSchema } from './auth.dto.js';
 import { authRateLimiter } from '../../api/middlewares/rate-limiter.js';
 
 const router = Router();
@@ -12,6 +12,7 @@ router.use(authRateLimiter);
 router.post('/register', validate(registerSchema), authController.register);
 router.post('/register/vendor', validate(registerVendorSchema), authController.registerVendor);
 router.post('/login', validate(loginSchema), authController.login);
+router.post('/login/telegram', validate(telegramLoginSchema), authController.telegramLogin);
 router.post('/refresh', authController.refresh);
 router.post('/logout', authController.logout);
 

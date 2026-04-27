@@ -10,6 +10,7 @@
     "dev": "nodemon src/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "swag" : " node ./src/config/swagger.config.js",
     "startOver": " npx prisma migrate reset --force && npx prisma migrate dev --name init &&  npx prisma generate && npx prisma db push",
     "seed": "node prisma/seed.js"
   },
@@ -44,6 +45,9 @@
     "pg": "^8.19.0",
     "prisma": "^7.4.2",
     "socket.io": "^4.8.3",
+    "swagger-autogen": "^2.23.7",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "zod": "^4.3.6"
   }
 }

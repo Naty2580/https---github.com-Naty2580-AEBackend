@@ -35,7 +35,33 @@ export class OrderRepository {
     }
   }
 
-  async findById(id){
+    async transitionOrderStatusWithETA(id, currentStatus, newStatus, changedById, estimatedPrepTimeMins) {
+    try {
+      const data = { status: newStatus };
+      
+      // If vendor provides an ETA, calculate the exact timestamp
+      if (estimatedPrepTimeMins) {
+        const readyAt = new Date();
+        readyAt.setMinutes(readyAt.getMinutes() + estimatedPrepTimeMins);
+        data.estimatedReadyAt = readyAt;
+      }
+
+      return await prisma.$transaction([
+        prisma.order.update({
+          where: { id, status: currentStatus },
+          data
+        }),
+        prisma.orderStatusHistory.create({
+          data: { orderId: id, newStatus, changedById }
+        })
+      ]);
+    } catch (error) {
+      if (error.code === 'P2025') throw new Error('STATE_CONFLICT');
+      throw error;
+    }
+  }
+
+  async findById(id) {
     return await prisma.order.findUnique({
       where: { id },
       include: {
@@ -81,7 +107,7 @@ export class OrderRepository {
           tip: orderData.tip,
           totalAmount: orderData.totalAmount,
           payoutAmount: orderData.payoutAmount,
-          status: 'CREATED',
+          status: 'AWAITING_ACCEPT',
           paymentStatus: 'AWAITING_PAYMENT',
           otpCode: orderData.otpCode,
 
@@ -96,9 +122,11 @@ export class OrderRepository {
 
           // 3. Nested write for Status History initialization
           statusHistory: {
-            create: {
-              newStatus: 'CREATED',
-              changedById: orderData.customerId
+            createMany: {
+              data: [
+                { newStatus: 'CREATED', changedById: orderData.customerId },
+                { newStatus: 'AWAITING_ACCEPT', changedById: orderData.customerId }
+              ]
             }
           }
         },
@@ -239,9 +267,9 @@ export class OrderRepository {
       return await prisma.$transaction([
         prisma.order.update({
           where: { id: orderId, status: currentStatus },
-          data: { 
-            status: 'AWAITING_ACCEPT', 
-            assignedDelivererId: null 
+          data: {
+            status: 'AWAITING_ACCEPT',
+            assignedDelivererId: null
           }
         }),
         prisma.orderStatusHistory.create({
@@ -290,7 +318,7 @@ export class OrderRepository {
     }
   }
 
- async cancelOrderOCC(orderId, currentStatus, actorId, reason) {
+  async cancelOrderOCC(orderId, currentStatus, actorId, reason) {
     try {
       return await prisma.$transaction([
         prisma.order.update({
@@ -298,9 +326,9 @@ export class OrderRepository {
           data: { status: 'CANCELLED' }
         }),
         prisma.orderStatusHistory.create({
-          data: { 
-            orderId, 
-            newStatus: 'CANCELLED', 
+          data: {
+            orderId,
+            newStatus: 'CANCELLED',
             changedById: actorId,
             // You can optionally add a 'reason' column to orderStatusHistory in schema later
             // For now, it's just recorded in the audit logs or handled by the caller
@@ -313,7 +341,7 @@ export class OrderRepository {
     }
   }
 
-    async finalizeOrderAndTriggerPayout(orderId, expectedCurrentStatus, actorId, payoutService) {
+  async finalizeOrderAndTriggerPayout(orderId, expectedCurrentStatus, actorId, payoutService) {
     try {
       return await prisma.$transaction(async (tx) => {
         const [order] = await tx.$queryRaw`
@@ -346,7 +374,7 @@ export class OrderRepository {
     }
   }
 
-   async findActiveDelivery(delivererId) {
+  async findActiveDelivery(delivererId) {
     const activeStates = [
       'ASSIGNED', 'AWAITING_PAYMENT', 'PAYMENT_RECEIVED',
       'VENDOR_BEING_PREPARED', 'VENDOR_READY_FOR_PICKUP',
@@ -360,14 +388,13 @@ export class OrderRepository {
       },
       include: {
         restaurant: { select: { name: true, location: true, phone: true, lat: true, lng: true } },
-        customer: { 
-          select: { 
-            defaultDormBlock: true, 
-            user: { select: { fullName: true, phoneNumber: true } } 
-          } 
+        customer: {
+          select: {
+            defaultLocation: true,
+            user: { select: { fullName: true, phoneNumber: true } }
+          }
         },
-        items: { select: { quantity: true, product: { select: { name: true } } } }
-      }
+items: { select: { quantity: true, unitPrice: true, product: { select: { name: true } } } }      }
     });
   }
 
@@ -388,6 +415,114 @@ export class OrderRepository {
         items: { select: { quantity: true, product: { select: { name: true } } } },
         deliverer: { select: { user: { select: { fullName: true } } } }
       }
+    });
+  }
+  
+  async executeCryptographicHandshake(orderId, expectedStatus, delivererId, payoutService) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const [order] = await tx.$queryRaw`
+          SELECT id, status, "payoutAmount", "assignedDelivererId" 
+          FROM "Order" 
+          WHERE id = ${orderId}::uuid 
+          FOR UPDATE;
+        `;
+
+        if (!order) throw new Error('NOT_FOUND');
+        if (order.status !== expectedStatus) throw new Error('STATE_CONFLICT');
+
+        const updatedOrder = await tx.order.update({
+          where: { id: orderId },
+          data: { status: 'COMPLETED' }
+        });
+
+        // Record both logical steps for the audit trail
+        await tx.orderStatusHistory.createMany({
+          data: [
+            { orderId, newStatus: 'DELIVERED', changedById: delivererId },
+            { orderId, newStatus: 'RECEIVED', changedById: delivererId },
+            { orderId, newStatus: 'COMPLETED', changedById: delivererId }
+          ]
+        });
+
+        await payoutService.executeDelivererPayout(updatedOrder, tx);
+
+        return updatedOrder;
+      });
+    } catch (error) {
+      if (error.message === 'STATE_CONFLICT') throw new Error('STATE_CONFLICT');
+      throw error;
+    }
+  }
+
+   async markUnfulfillable(orderId, delivererId, reasonEnum, details) {
+    try {
+      return await prisma.$transaction([
+        prisma.order.update({
+          where: { id: orderId },
+          data: { status: 'CANCELLED' } // Cancel the order completely
+        }),
+        prisma.orderStatusHistory.create({
+          data: { orderId, newStatus: 'CANCELLED', changedById: delivererId }
+        }),
+        // Log the operational failure for platform analytics
+        prisma.dispatchLog.create({
+          data: {
+            orderId, delivererId, 
+            action: 'DECLINED', // Penalize slightly or track for operational review
+          }
+        })
+      ]);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async createReviewAndUpdateRatings(orderId, customerId, restaurantId, delivererId, data) {
+    return await prisma.$transaction(async (tx) => {
+      // 1. Create the Review
+      const review = await tx.review.create({
+        data: {
+          orderId,
+          rating: data.restaurantRating, // Storing restaurant rating in core review
+          comment: data.comment
+        }
+      });
+
+      // 2. Aggregate Restaurant Rating
+      const restStats = await tx.review.aggregate({
+        where: { order: { restaurantId } },
+        _avg: { rating: true },
+        _count: { id: true }
+      });
+      await tx.restaurant.update({
+        where: { id: restaurantId },
+        data: { avgRating: restStats._avg.rating || 5.0, totalReviews: restStats._count.id }
+      });
+
+      // 3. Aggregate Deliverer Rating (If applicable)
+      if (delivererId && data.delivererRating) {
+        // We log a separate metric for deliverers (or you can expand the Review model later)
+        // For now, we manually adjust a moving average for simplicity, or query past orders
+        const delivererStats = await tx.order.aggregate({
+          where: { assignedDelivererId: delivererId, status: 'COMPLETED' },
+          _count: { id: true }
+        });
+        
+        const currentProfile = await tx.delivererProfile.findUnique({ where: { userId: delivererId } });
+        const currentRating = Number(currentProfile.rating);
+        const totalDeliveries = delivererStats._count.id || 1;
+        
+        // Simple moving average
+        const newRating = ((currentRating * (totalDeliveries - 1)) + data.delivererRating) / totalDeliveries;
+        
+        await tx.delivererProfile.update({
+          where: { userId: delivererId },
+          data: { rating: newRating.toFixed(2) }
+        });
+      }
+
+      return review;
     });
   }
   

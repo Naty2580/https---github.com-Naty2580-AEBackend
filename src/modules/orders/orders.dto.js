@@ -57,21 +57,40 @@ export const cancelOrderSchema = z.object({
 export const updateVendorStateSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
   body: z.object({
-    status: z.enum(['VENDOR_BEING_PREPARED', 'VENDOR_READY_FOR_PICKUP'])
+    status: z.enum(['VENDOR_BEING_PREPARED', 'VENDOR_READY_FOR_PICKUP']),
+    estimatedPrepTimeMins: z.number().int().min(1).max(120).optional()
   })
 });
 
 export const updateDelivererStateSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
   body: z.object({
-    status: z.enum(['PICKED_UP', 'EN_ROUTE', 'ARRIVED', 'DELIVERED'])
+    status: z.enum(['PICKED_UP', 'EN_ROUTE', 'ARRIVED', 'DELIVERED']),
+     currentLat: z.number().min(-90).max(90, "Valid latitude required"),
+    currentLng: z.number().min(-180).max(180, "Valid longitude required")
   })
-});
+  });
+  
+
 
 export const completeOrderSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
   body: z.object({
     otpCode: z.string().length(6, "OTP code must be 6 digits")
+  })
+});
+
+export const reportUnfulfillableSchema = z.object({
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({
+    reason: z.enum([
+      'RESTAURANT_CLOSED', 
+      'OUT_OF_STOCK', 
+      'VENDOR_REFUSED', 
+      'CUSTOMER_UNREACHABLE',
+        'PRICE_MISMATCH' 
+    ]),
+    details: z.string().trim().max(255).optional()
   })
 });
 
@@ -90,5 +109,16 @@ export const raiseDisputeSchema = z.object({
   }),
   body: z.object({
     reason: z.string().trim().min(10, "A detailed reason must be provided to raise a dispute.")
+  })
+});
+
+export const quoteSchema = checkoutSchema;
+
+export const createReviewSchema = z.object({
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({
+    restaurantRating: z.number().int().min(1).max(5),
+    delivererRating: z.number().int().min(1).max(5).optional(), // Optional if order was cancelled/not delivered
+    comment: z.string().trim().max(500).optional()
   })
 });
