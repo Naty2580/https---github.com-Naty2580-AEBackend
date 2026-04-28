@@ -6,9 +6,13 @@ import { createServer } from 'node:http';
 import { app } from './api/server.js';
 import config from './config/env.config.js';
 import prisma from './infrastructure/database/prisma.client.js';
+import { timeoutService } from './modules/orders/timeout.service.js';
+import { socketManager } from './infrastructure/websockets/socket.manager.js';
 
 // Create native HTTP server wrapping the Express app
 const server = createServer(app);
+// Initialize WebSocket server with the same HTTP server
+socketManager.initialize(server);
 
 // Bootstrap Function
 const startServer = async () => {
@@ -16,6 +20,7 @@ const startServer = async () => {
     // Ensure Database Connection is viable before accepting traffic
     await prisma.$connect();
     console.log('✅ Database connection established successfully.');
+    timeoutService.sweepOrphanedOrders().catch(console.error);
 
     server.listen(config.PORT, () => {
       console.log(`🚀 ASTU Eats Backend running in ${config.NODE_ENV} mode on port ${config.PORT}`);

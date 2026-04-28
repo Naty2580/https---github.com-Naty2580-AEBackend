@@ -70,7 +70,8 @@ export class UserRepository {
           { email: identifier },
           { phoneNumber: identifier }
         ]
-      }
+      },
+      include: { customerProfile: true, delivererProfile: true, vendorProfile: true }
     });
   }
   async hasActiveOrders(userId) {

@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
@@ -16,17 +17,40 @@ BigInt.prototype.toJSON = function() {
   return this.toString();
 };
 
+ 
+
 const app = express();
 
 // 1. Security & Utility Middlewares
 app.use(helmet()); // Secure HTTP headers
-app.use(morgan('dev'));
+
+const allowedOrigins = [
+  'http://localhost:3000', // React/Next.js default
+  'http://localhost:5173', // Vite default
+  'http://127.0.0.1:5173', // Vite alternate
+  process.env.FRONTEND_URL  // Production URL
+].filter(Boolean); // Remove undefined values
 
 app.use(cors({
-  origin: '*', // Adjust this in production based on frontend domains
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS Blocked] Origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // OPTIONS is required for preflight
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'], // Explicitly allow headers
+  credentials: true // REQUIRED for HttpOnly cookies
 }));
+
+app.use(morgan('dev'));
+
+
 
 // Payload parsers
 app.use(express.json({ limit: '1mb' })); // Prevent large payload DOS attacks
@@ -47,5 +71,7 @@ app.use((req, res, next) => {
 
 // 4. Global Error Handling (Must be the last middleware)
 app.use(globalErrorHandler);
+
+timeoutService.sweepOrphanedOrders().catch(console.error);
 
 export { app };
