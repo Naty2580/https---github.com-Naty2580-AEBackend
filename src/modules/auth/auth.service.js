@@ -153,7 +153,7 @@ export class AuthService {
 
     return {
       accessToken,
-      refreshToken, user: { id: user.id, fullName: user.fullName, role: user.role }
+      refreshToken, user 
     };
   }
 

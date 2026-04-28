@@ -46,6 +46,7 @@
     "prisma": "^7.4.2",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
+    "socket.io": "^4.8.3",
     "zod": "^4.3.6"
   }
 }

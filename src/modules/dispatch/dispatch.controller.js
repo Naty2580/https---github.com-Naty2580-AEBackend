@@ -14,3 +14,13 @@ export const acceptOrder = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getMetrics = async (req, res, next) => {
+  try {
+    const { delivererId } = req.params;
+    const metrics = await dispatchService.getDelivererMetrics(req.user.id, delivererId, req.user.role);
+    res.status(200).json({ success: true, data: metrics });
+  } catch (error) {
+    next(error);
+  }
+};
