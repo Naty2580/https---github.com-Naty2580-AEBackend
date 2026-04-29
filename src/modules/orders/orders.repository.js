@@ -95,8 +95,9 @@ export class OrderRepository {
   async createOrderWithItems(orderData, itemsData) {
     return await prisma.$transaction(async (tx) => {
       // 1. Create the Order
+
       const order = await tx.order.create({
-        data: {
+        data: { 
           shortId: orderData.shortId,
           customerId: orderData.customerId,
           restaurantId: orderData.restaurantId,
@@ -105,8 +106,8 @@ export class OrderRepository {
           serviceFee: orderData.serviceFee,
           transactionFee: 0.00, // Determined later by payment gateway
           tip: orderData.tip,
-          totalAmount: orderData.totalAmount,
-          payoutAmount: orderData.payoutAmount,
+          totalAmount: orderData.totalAmount, 
+          // payoutAmount: orderData.payoutAmount,
           status: 'AWAITING_ACCEPT',
           paymentStatus: 'AWAITING_PAYMENT',
           otpCode: orderData.otpCode,
@@ -124,15 +125,16 @@ export class OrderRepository {
           statusHistory: {
             createMany: {
               data: [
-                { newStatus: 'CREATED', changedById: orderData.customerId },
-                { newStatus: 'AWAITING_ACCEPT', changedById: orderData.customerId }
+                { newStatus: 'CREATED', changedById: orderData.userId },
+                { newStatus: 'AWAITING_ACCEPT', changedById: orderData.userId }
               ]
             }
           }
         },
         include: {
           items: true,
-          restaurant: { select: { name: true, location: true, mode: true, phone: true } }
+          restaurant: { select: { name: true, location: true, mode: true, phone: true } },
+          customer: true,
         }
       });
       return order;
@@ -345,7 +347,7 @@ export class OrderRepository {
     try {
       return await prisma.$transaction(async (tx) => {
         const [order] = await tx.$queryRaw`
-          SELECT id, status, "payoutAmount", "assignedDelivererId" 
+          SELECT id, status, "payoutAmount", "delivererId" 
           FROM "Order" 
           WHERE id = ${orderId}::uuid 
           FOR UPDATE;
@@ -418,11 +420,11 @@ items: { select: { quantity: true, unitPrice: true, product: { select: { name: t
     });
   }
   
-  async executeCryptographicHandshake(orderId, expectedStatus, delivererId, payoutService) {
+  async executeCryptographicHandshake(orderId, expectedStatus,userId, delivererId, payoutService) {
     try {
       return await prisma.$transaction(async (tx) => {
         const [order] = await tx.$queryRaw`
-          SELECT id, status, "payoutAmount", "assignedDelivererId" 
+          SELECT id, status, "payoutAmount", "delivererId" 
           FROM "Order" 
           WHERE id = ${orderId}::uuid 
           FOR UPDATE;
@@ -439,9 +441,9 @@ items: { select: { quantity: true, unitPrice: true, product: { select: { name: t
         // Record both logical steps for the audit trail
         await tx.orderStatusHistory.createMany({
           data: [
-            { orderId, newStatus: 'DELIVERED', changedById: delivererId },
-            { orderId, newStatus: 'RECEIVED', changedById: delivererId },
-            { orderId, newStatus: 'COMPLETED', changedById: delivererId }
+            { orderId, newStatus: 'DELIVERED', changedById: userId },
+            { orderId, newStatus: 'RECEIVED', changedById: userId },
+            { orderId, newStatus: 'COMPLETED', changedById: userId }
           ]
         });
 

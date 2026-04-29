@@ -336,6 +336,7 @@ model Order {
   serviceFee     Decimal @db.Decimal(10, 2)
   tip            Decimal @default(0.00) @db.Decimal(10, 2) // Added from PRD
   totalAmount    Decimal @db.Decimal(10, 2)
+  payoutAmount    Decimal @db.Decimal(10, 2)
 
   // State
   status        OrderStatus   @default(CREATED)

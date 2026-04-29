@@ -10,13 +10,25 @@ export class PaymentService {
     this.ledgerService = new LedgerService();
   }
 
-  async initializePayment(customerId, userEmail, userFullName, orderId) {
+  async initializePayment(userId, userEmail, userFullName, orderId) {
+
+    
+const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { customerProfile: true }
+    });
+
+     if (!user || !user.customerProfile) {
+      throw new BusinessLogicError("Customer profile not found. Cannot place order.");
+    }
+    const cusId = user.customerProfile.id;
+
     const order = await prisma.order.findUnique({
       where: { id: orderId }
     });
 
     if (!order) throw new NotFoundError('Order not found');
-    if (order.customerId !== customerId) throw new ForbiddenError('Unauthorized access to this order.');
+    if (order.customerId !== cusId) throw new ForbiddenError('Unauthorized access to this order.');
     if (order.status !== 'ASSIGNED') throw new BusinessLogicError('Order is not ready for payment. Waiting for a deliverer to accept.');
     if (order.paymentStatus !== 'AWAITING_PAYMENT') throw new BusinessLogicError('Payment has already been processed or cancelled.');
 
@@ -67,6 +79,18 @@ export class PaymentService {
 
         if (order.paymentStatus === 'CAPTURED') return; 
 
+        const profile = await tx.customerProfile.findUnique({
+          where: { id: order.customerId },
+          select: { userId: true }
+        });
+
+        if (!profile) {
+          console.error(`[WEBHOOK ERROR] No CustomerProfile found for id: ${order.customerId}`);
+          return;
+        }
+
+        const rootUserId = profile.userId;
+
         // Phantom Cancellation Edge Case
         if (order.status === 'CANCELLED' || order.status === 'NO_DELIVERER_FOUND') {
 
@@ -76,8 +100,8 @@ export class PaymentService {
             where: { id: order.id },
             data: { paymentStatus: 'REFUNDED' }
           });
-          await this.ledgerService.processFinancialEvent(order, 'ESCROW_RESERVE', order.totalAmount, order.customerId, tx);
-          await this.ledgerService.processFinancialEvent(order, 'REFUND', order.totalAmount, order.customerId, tx);
+          await this.ledgerService.processFinancialEvent(order, 'ESCROW_RESERVE', order.totalAmount, rootUserId, tx);
+          await this.ledgerService.processFinancialEvent(order, 'REFUND', order.totalAmount, rootUserId, tx);
 
           ChapaAdapter.issueRefund(chapaRef, order.totalAmount).catch(e => {
             console.error(`🔥 [CRITICAL] Physical refund failed for Order ${order.id}. Requires manual intervention.`, e);
@@ -96,14 +120,14 @@ export class PaymentService {
         });
 
         await tx.orderStatusHistory.create({
-          data: { orderId: order.id, newStatus: 'PAYMENT_RECEIVED', changedById: order.customerId }
+          data: { orderId: order.id, newStatus: 'PAYMENT_RECEIVED', changedById: rootUserId }
         });
 
         await this.ledgerService.processFinancialEvent(
-          updated, 'ESCROW_RESERVE', updated.totalAmount, updated.customerId, tx
+          updated, 'ESCROW_RESERVE', updated.totalAmount, rootUserId, tx
         );
       });
-    } catch (error) {
+    } catch (error) { 
       if (error.code !== 'P2025') throw error;
     }
   }

@@ -13,7 +13,7 @@ const router = Router();
 router.use(protect);
 
 router.get('/', validate(queryRestaurantSchema), controller.list);
-router.get('/:id', validate(restaurantIdParamSchema), controller.getDetails);
+router.get('/:id',restrictTo('CUSTOMER', 'VENDOR', 'ADMIN') ,validate(restaurantIdParamSchema), controller.getDetails);
 
 router.post('/',
   restrictTo('ADMIN'), // Only Admins can register new restaurants

@@ -1,37 +1,38 @@
-import swaggerJSDoc from "swagger-jsdoc";
+import swaggerJSDoc from 'swagger-jsdoc';
+import config from './env.config.js';
 
-const options = {
-    definition: {
-        openapi: '3.0.0',
-        info: {
-            title: 'ASTU EATS API',
-            version: '1.0.0',
-            description: 'API documentation for the ASTU Eats crowdsourced food delivery platform',
-        },
-        servers: [
-            {
-                url: 'http://localhost:3000/api/v1',
-                description: 'Local development server'
-            },
-        ],
-        components: {
-            securitySchemes: {
-                // Allows testing endpoints that require Auth headers right from the UI
-                BearerAuth: {
-                    type: 'http',
-                    scheme: 'bearer',
-                    bearerFormat: 'JWT',
-                }
-            }
-        },
-        security: [
-            {
-                BearerAuth: []
-            }
-        ]
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'ASTU Eats API Specification',
+      version: '1.0.0',
+      description: 'Enterprise REST API documentation for the ASTU Eats Campus Delivery Platform.',
+      contact: {
+        name: 'Engineering Team'
+      }
     },
-    // Tells Swagger to read the comments above ALL your route files (.routes.js)
-    apis: ['./src/modules/**/*.routes.js']
-}
+    servers: [
+      {
+        url: `http://localhost:${config.PORT}/api/v1`,
+        description: 'Development Server',
+      },
+    ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Enter your JWT Access Token. Do not include "Bearer " in the input field.'
+        },
+      },
+    },
+    // Applies Bearer auth globally to all routes unless overridden
+    security: [{ bearerAuth: [] }], 
+  },
+  // Tells Swagger where to find the API definitions
+  apis: ['./src/modules/**/*.routes.js'],
+};
 
-export const swaggerDocs = swaggerJSDoc(options)
+export const swaggerSpec = swaggerJSDoc(swaggerOptions);

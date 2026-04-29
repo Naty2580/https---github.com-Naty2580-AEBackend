@@ -7,20 +7,25 @@ export class DispatchRepository {
   async lockAndAssignOrder(orderId, delivererId) {
     return await prisma.$transaction(async (tx) => {
       // 1. Lock the order row (SELECT FOR UPDATE)
-      const order = await tx.order.findUnique({
-        where: { id: orderId },
-        select: { id: true, assignedDelivererId: true, status: true }
-      });
+       const [order] = await tx.$queryRaw`
+        SELECT id, status, "delivererId" 
+        FROM "Order" 
+        WHERE id = ${orderId}::uuid 
+        FOR UPDATE;
+      `;
 
-      if (!order || order.assignedDelivererId !== null || order.status !== 'AWAITING_ACCEPT') {
-        throw new Error('Order is no longer available for assignment.');
+      if (!order) throw new Error("Order does not exist.");
+
+      // CRITICAL FIX: The DB field is delivererId
+      if (order.status !== 'AWAITING_ACCEPT' || order.delivererId !== null) {
+        throw new Error("Order already claimed.");
       }
 
       // 2. Assign the deliverer
       return await tx.order.update({
         where: { id: orderId },
         data: { 
-          assignedDelivererId: delivererId,
+          delivererId: delivererProfileId,
           status: 'ASSIGNED'
         }
       });
@@ -78,11 +83,10 @@ export class DispatchRepository {
     });
   }
 
-   async atomicAssignOrder(orderId, delivererId) {
+  async atomicAssignOrder(orderId, userId, delivererProfileId) {
     return await prisma.$transaction(async (tx) => {
-      // Postgres Raw Query for strict row-level lock
       const [order] = await tx.$queryRaw`
-        SELECT id, status, "assignedDelivererId" 
+        SELECT id, status, "delivererId" 
         FROM "Order" 
         WHERE id = ${orderId}::uuid 
         FOR UPDATE;
@@ -90,27 +94,22 @@ export class DispatchRepository {
 
       if (!order) throw new Error("Order does not exist.");
 
-      if (order.status !== 'AWAITING_ACCEPT' || order.assignedDelivererId !== null) {
+      // CRITICAL FIX: The DB field is delivererId
+      if (order.status !== 'AWAITING_ACCEPT' || order.delivererId !== null) {
         throw new Error("Order already claimed.");
       }
 
       const updated = await tx.order.update({
         where: { id: orderId },
-        data: { status: 'ASSIGNED', assignedDelivererId: delivererId }
+        data: { status: 'ASSIGNED', delivererId: delivererProfileId } // Use Profile ID
       });
 
-      // COMPLETENESS: Write to DispatchLog for Acceptance Rate calculation
       await tx.dispatchLog.create({
-        data: {
-          orderId,
-          delivererId,
-          action: 'ACCEPTED'
-        }
+        data: { orderId, delivererId: userId, action: 'ACCEPTED' } // Use User ID
       });
 
-      // Advance State History
       await tx.orderStatusHistory.create({
-        data: { orderId, newStatus: 'ASSIGNED', changedById: delivererId }
+        data: { orderId, newStatus: 'ASSIGNED', changedById: userId } // Use User ID
       });
 
       return updated;

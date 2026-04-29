@@ -3,7 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import swaggerUi from 'swagger-ui-express'
-import { swaggerDocs } from '../config/swagger.config.js';
+import { swaggerSpec } from '../config/swagger.config.js';
 import cookieParser from 'cookie-parser';
 import { timeoutService } from "../modules/orders/timeout.service.js"
 import v1Routes from './routes.v1.js';
@@ -54,8 +54,10 @@ app.use(express.json({ limit: '1mb' })); // Prevent large payload DOS attacks
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs))
-
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+  customSiteTitle: 'ASTU Eats API Docs'
+}));
 // 2. API Routing
 app.use('/api/v1', v1Routes);
 

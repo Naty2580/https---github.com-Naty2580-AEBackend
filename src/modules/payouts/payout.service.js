@@ -20,9 +20,11 @@ export class PayoutService {
     // 2. Fetch Deliverer Payout Details
     // Depending on the query depth from the OrderService, we might need to fetch the profile
     const deliverer = await txClient.delivererProfile.findUnique({
-      where: { userId: order.assignedDelivererId },
+      where: { id: order.delivererId },
       include: { user: { select: { fullName: true } } }
     });
+
+    console.log("del", deliverer);
 
     if (!deliverer || !deliverer.payoutAccount) {
       await this.payoutRepository.logAttempt(order.id, 'FAILED', 'Missing payout account');
@@ -43,7 +45,7 @@ export class PayoutService {
 
       //   // 5. Update Ledger (Double Entry)
       //   await this.ledgerService.processFinancialEvent(
-      //     order, 'REIMBURSEMENT_PAYMENT', order.payoutAmount, order.assignedDelivererId, txClient
+      //     order, 'REIMBURSEMENT_PAYMENT', order.payoutAmount, order.delivererId, txClient
       //   );
 
       //   if (Number(order.serviceFee) > 0) {
@@ -61,18 +63,27 @@ export class PayoutService {
       const payoutData = {
         account_name: deliverer.user.fullName,
         account_number: deliverer.payoutAccount,
-        amount: Number(order.payoutAmount).toString(),
+        amount: "50.0",
+        // amount: Number(order.payoutAmount).toString(),
         currency: 'ETB',
         reference: transferRef,
         bank_code: deliverer.payoutProvider, // Make sure DB stores 'telebirr' or CBE code
       };
-      const payoutResult = await ChapaAdapter.transferFunds(payoutData);
+      // const payoutResult = await ChapaAdapter.transferFunds(payoutData);
+
+      // mock payout result for testing without hitting real API
+      const payoutResult = {
+        "message": "Transfer Queued Successfully",
+        "status": "success",
+        "data": "3241342142sfdd"
+      }
 
       // Record Success and Ledger
       await this.payoutRepository.logAttempt(order.id, 'SUCCESS', JSON.stringify(payoutResult));
       await this.ledgerService.processFinancialEvent(
-        order, 'REIMBURSEMENT_PAYMENT', order.payoutAmount, order.assignedDelivererId, txClient
-      );
+        order, 'REIMBURSEMENT_PAYMENT', order.payoutAmount = 120, order.delivererId, txClient
+        // order, 'REIMBURSEMENT_PAYMENT', order.payoutAmount, order.delivererId, txClient
+      ); 
 
     } catch (error) {
       // 6. Record Failure

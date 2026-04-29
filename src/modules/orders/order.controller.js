@@ -66,6 +66,8 @@ export const cancelOrder = async (req, res, next) => {
 
 export const checkout = async (req, res, next) => {
   try {
+
+
     // Controller strictly passes req.user.id to ensure the order is tied to the authenticated token
     const order = await orderService.checkout(req.user.id, req.body);
     

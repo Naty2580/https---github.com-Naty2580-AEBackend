@@ -16,13 +16,14 @@ export const createOrderSchema = z.object({
 
 export const checkoutSchema = z.object({
   body: z.object({
-    restaurantId: z.string().uuid("Invalid restaurant ID"),
-    deliveryLat: z.number().min(-90).max(90, "Valid delivery latitude required"),
-    deliveryLng: z.number().min(-180).max(180, "Valid delivery longitude required"),
+    restaurantId: z.uuid("Invalid restaurant ID"),
+    deliveryLat: z.number().min(-90).max(90, "Valid delivery latitude required").optional(),
+    deliveryLng: z.number().min(-180).max(180, "Valid delivery longitude required").optional(),
     items: z.array(
       z.object({
-        menuId: z.string().uuid("Invalid menu item ID"),
-        quantity: z.number().int().positive("Quantity must be at least 1")
+        menuId: z.uuid("Invalid menu item ID"),
+        quantity: z.number().int().positive("Quantity must be at least 1"),
+        expectedUnitPrice: z.number().positive("Expected unit price is required")
       })
     ).min(1, "Cart cannot be empty"),
     tip: z.number().nonnegative().default(0.00)

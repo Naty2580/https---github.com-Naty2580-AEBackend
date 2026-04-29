@@ -11,11 +11,20 @@ export class DispatchService {
   }
 
   async acceptOrder(orderId, delivererId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { delivererProfile: { select: { id: true } } }
+    });
+
+    if (!user || !user.delivererProfile) {
+      throw new ForbiddenError("Deliverer profile not found.");
+    }
+
     // 1. Atomic DB assignment
-    const order = await this.repository.atomicAssignOrder(orderId, delivererId);
+    const order = await this.repository.atomicAssignOrder(orderId, userId, user.delivererProfile.id);
     
     // 2. Start the 5-minute payment countdown
-    timeoutService.schedulePaymentTimeout(orderId, order.customerId); // Pass customerId for tracking
+    timeoutService.schedulePaymentTimeout(orderId,userId); // Pass customerId for tracking
     
     // 3. REAL-TIME PUSH: Tell the customer a deliverer was found!
     socketManager.emitOrderUpdate(orderId, 'ORDER_STATUS_UPDATE', {

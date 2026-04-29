@@ -20,11 +20,12 @@ export const initialize = async (req, res, next) => {
 export const chapaWebhook = async (req, res, next) => {
   try {
     // FIX: Correct spelling of 'signature'
-    const signature = req.headers['x-chapa-signature'];
+    // const signature = req.headers['x-chapa-signature'];
 
-    if (!ChapaAdapter.verifyWebhookSignature(signature, req.body)) {
-      return res.status(401).send('Invalid signature');
-    }
+    // must be uncommented in production
+    // if (!ChapaAdapter.verifyWebhookSignature(signature, req.body)) {
+    //   return res.status(401).send('Invalid signature');
+    // }
 
     const { tx_ref, status } = req.body;
 

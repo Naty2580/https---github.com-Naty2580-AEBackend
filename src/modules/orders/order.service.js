@@ -27,6 +27,20 @@ export class OrderService {
     this.payoutService = new PayoutService();
   }
 
+  async _getActorProfiles(userId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        customerProfile: { select: { id: true } },
+        delivererProfile: { select: { id: true } }
+      }
+    });
+    return {
+      customerId: user?.customerProfile?.id,
+      delivererId: user?.delivererProfile?.id
+    };
+  }
+
   _aggregateCartItems(items) {
     const aggregated = {};
     for (const item of items) {
@@ -87,7 +101,12 @@ export class OrderService {
     };
   }
 
-  async checkout(customerId, data) {
+  async checkout(userId, data) {
+
+   const profiles = await this._getActorProfiles(userId);
+    if (!profiles.customerId) throw new BusinessLogicError("Customer profile not found.");
+
+
     const sanitizedItems = this._aggregateCartItems(data.items);
     const requestedItemIds = sanitizedItems.map(i => i.menuId);
 
@@ -122,20 +141,22 @@ export class OrderService {
 
     const deliveryFee = calculateDeliveryFee(distanceMeters);
     const serviceFee = calculateServiceFee(foodPrice);
-    const tip = data.tip;
+    const tip = data.tip || 0.00;
     const totalAmount = Number((foodPrice + deliveryFee + serviceFee + tip).toFixed(2));
     const payoutAmount = Number((foodPrice + deliveryFee + tip).toFixed(2));
 
+
     const orderPayload = {
       shortId: generateShortId(),
-      customerId,
+      customerId: profiles.customerId,
+      userId: userId,
       restaurantId: data.restaurantId,
       foodPrice, deliveryFee, serviceFee, tip, totalAmount, payoutAmount,
       otpCode: generateOTP()
     };
 
     const newOrder = await this.orderRepository.createOrderWithItems(orderPayload, validatedItemsData);
-    timeoutService.scheduleBroadcastTimeout(newOrder.id, customerId);
+    timeoutService.scheduleBroadcastTimeout(newOrder.id, userId);
 
     return newOrder;
   }
@@ -185,7 +206,7 @@ export class OrderService {
     });
   }
 
-  async _verifyTransitionRules(order, targetStatus, allowedRoles, userRole, userId) {
+  async _verifyTransitionRules(order, targetStatus, allowedRoles, userRole, userId, profiles) {
     if (!allowedRoles.includes(userRole)) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
@@ -219,7 +240,7 @@ export class OrderService {
       const access = await this.restaurantRepository.checkVendorAccess(userId, order.restaurantId);
       if (!access) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
-    if (userRole === 'DELIVERER' && order.assignedDelivererId !== userId) {
+     if (userRole === 'DELIVERER' && order.delivererId !== profiles.delivererId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
   }
@@ -385,10 +406,13 @@ export class OrderService {
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
     // Strict IDOR Protection: You can only view an order if you are involved in it
-    if (userRole === 'CUSTOMER' && order.customerId !== userId) {
+     const profiles = await this._getActorProfiles(userId);
+
+    if (userRole === 'CUSTOMER' && order.customerId !== profiles.customerId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
-    if (userRole === 'DELIVERER' && order.assignedDelivererId !== userId) {
+    // CRITICAL FIX: Compare against delivererProfile.id
+    if (userRole === 'DELIVERER' && order.delivererId !== profiles.delivererId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
     if (userRole === 'VENDOR_STAFF') {
@@ -482,8 +506,10 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    // IDOR & Role Checks
-    if (userRole === 'CUSTOMER' && order.customerId !== actorId) {
+    const profiles = await this._getActorProfiles(actorId);
+
+    // FIX: Use profile check
+    if (userRole === 'CUSTOMER' && order.customerId !== profiles.customerId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
     if (userRole === 'VENDOR_STAFF') {
@@ -542,7 +568,10 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    if (order.assignedDelivererId !== delivererId) {
+     const profiles = await this._getActorProfiles(delivererId);
+
+    // FIX: Compare against DelivererProfile.id
+    if (order.delivererId !== profiles.delivererId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
 
@@ -602,7 +631,9 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    await this._verifyTransitionRules(order, status, ['DELIVERER', 'ADMIN'], userRole, userId);
+    const profiles = await this._getActorProfiles(userId);
+       
+    await this._verifyTransitionRules(order, status, ['DELIVERER', 'ADMIN'], userRole, userId, profiles);
 
     try {
       // If Deliverer marks DELIVERED, and Customer already marked RECEIVED, finalize immediately.
@@ -632,12 +663,14 @@ export class OrderService {
     }
   }
 
-  async completeOrderWithOTP(delivererId, orderId, otpCode) {
+  async completeOrderWithOTP(userId, orderId, otpCode) {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
+    //fetch delivererId from userId
+    const delivererId = await this._getActorProfiles(userId).then((profiles) => profiles.delivererId);
     // IDOR Check: Only the assigned deliverer can submit the OTP
-    if (order.assignedDelivererId !== delivererId) {
+    if (order.delivererId !== delivererId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
 
@@ -651,7 +684,7 @@ export class OrderService {
 
     try {
       await this.orderRepository.executeCryptographicHandshake(
-        orderId, order.status, delivererId, this.payoutService
+        orderId, order.status, userId,delivererId, this.payoutService
       );
 
       this._emitOrderUpdate(orderId, 'COMPLETED', `Delivery confirmed. Escrow released.`);
@@ -695,7 +728,10 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    if (order.assignedDelivererId !== delivererId) {
+    const profiles = await this._getActorProfiles(delivererId);
+
+    // FIX: Profile check
+    if (order.delivererId !== profiles.delivererId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
 

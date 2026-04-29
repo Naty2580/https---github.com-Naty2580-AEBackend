@@ -85,7 +85,7 @@ router.patch('/:id/status', orderController.updateStatus);
 // Checkout: Converts cart to order (Requires CUSTOMER role)
 router.post(
   '/checkout', 
-  restrictTo('CUSTOMER', 'DELIVERER', 'ADMIN'), // Remember: Deliverers & Admins can order food too
+  restrictTo('CUSTOMER', 'ADMIN'), // Remember: Deliverers & Admins can order food too
   validate(checkoutSchema), 
   orderController.checkout
 );

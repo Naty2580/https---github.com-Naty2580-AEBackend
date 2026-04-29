@@ -6,7 +6,18 @@ export class OrderWorkflowService {
    * Deliverer accepts the order.
    * Logic: Sets status to ASSIGNED, locks deliverer.
    */
-  async acceptOrder(orderId, delivererId) {
+  async acceptOrder(orderId, userId) {
+
+    const user = await prisma.user.findUnique({
+          where: { id: userId },
+          include: { delivererProfile: true }
+        });
+    
+         if (!user || !user.delivererProfile) {
+          throw new BusinessLogicError("Deliverer profile not found. Cannot accept order.");
+        }
+        const delivererId = user.delivererProfile.id;
+
     return await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: orderId } });
       
@@ -16,7 +27,7 @@ export class OrderWorkflowService {
         where: { id: orderId },
         data: { 
           status: 'ASSIGNED', 
-          assignedDelivererId: delivererId 
+          delivererId: delivererId 
         }
       });
 

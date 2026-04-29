@@ -11,7 +11,7 @@ const router = Router();
 // ==========================================
 router.post(
   '/initialize', 
-  protect, 
+  protect,  
   validate(initializePaymentSchema), 
   paymentController.initialize
 );
