@@ -277,7 +277,17 @@ export class UserRepository {
           fullName: true,
           role: true,
           status: true,
-          createdAt: true
+          createdAt: true,
+          customerProfile:{
+            select: {
+              totalOrders: true
+            }
+          },
+          delivererProfile: {
+            select: {
+              totalDeliveries: true
+            }
+          }
         }
       })
     ]);

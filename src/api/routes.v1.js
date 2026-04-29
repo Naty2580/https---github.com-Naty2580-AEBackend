@@ -3,6 +3,7 @@ import authRoutes from '../modules/auth/auth.routes.js';
 import userRoutes from '../modules/users/users.routes.js';
 import restaurantRoutes from '../modules/restaurants/restaurant.routes.js';
 import menuRoutes from '../modules/menus/menu.routes.js';
+import paymentsRoutes from '../modules/payments/payment.routes.js';
 import * as menuController from '../modules/menus/menu.controller.js';
 import { validate } from '../api/middlewares/validate.middleware.js';
 import { queryMenuItemsSchema } from '../modules/menus/menu.dto.js';
@@ -26,11 +27,8 @@ router.get('/health', (req, res) => {
 router.use('/users', userRoutes);
 router.use('/auth', authRoutes);
 router.use('/restaurants', restaurantRoutes);
-router.use('/restaurants/:restaurantId', menuRoutes); 
-
-router.use('/orders', orderRoutes);
-router.use('/dispatch', dispatchRoutes);
-router.use('/payments', paymentRoutes);
+router.use('/restaurants/:restaurantId', menuRoutes);
+router.use('/payments', paymentsRoutes);
 
 // Global menu search endpoint (no restaurantId in path)
 router.get(

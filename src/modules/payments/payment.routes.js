@@ -3,9 +3,11 @@ import { verifyChapaSignature } from '../../infrastructure/payment/chapa.adapter
 import { PaymentService } from './payment.service.js';
 import * as paymentController from './payment.controller.js';
 import { protect } from '../../api/middlewares/auth.middleware.js'
+import { PaymentController } from './payment.controller.js';
+import {protect} from '../../api/middlewares/auth.middleware.js'
 
 const router = Router();
-const paymentService = new PaymentService();
+const paymentController = new PaymentController();
 
 // ==========================================
 // INTERNAL APP ROUTES (Requires Auth)
@@ -25,8 +27,46 @@ router.post('/webhook/chapa', async (req, res) => {
   if (status === 'success') {
     await paymentService.handlePaymentSuccess(tx_ref, req.body.id);
   }
+/**
+ * @openapi
+ * /payments/initialize:
+ *   post:
+ *     summary: Initialize a new Chapa Payment Session
+ *     description: Returns a checkout URL for the customer to finalize payment via Chapa.
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               orderId:
+ *                 type: string
+ *                 description: The unique ID of the order being paid for
+ *                 example: "123e4567-e89b-12d3-a456-426614174000"
+ *     responses:
+ *       200:
+ *         description: Successfully initialized transaction
+ *       400:
+ *         description: Order not found or not in payable state
+ */
+router.post('/initialize', protect, paymentController.initialize)
 
-  res.status(200).send('Webhook Received');
-});
+router.post('/webhook/chapa', paymentController.chapaWebhook)
+
+// router.post('/webhook/chapa', async (req, res) => {
+//   const signature = req.headers['x-chapa-signature'];
+//   if (!verifyChapaSignature(signature, req.body)) {
+//     return res.status(401).send('Invalid signature');
+//   }
+
+//   const { tx_ref, status } = req.body;
+//   if (status === 'success') {
+//     await paymentService.handlePaymentSuccess(req.body.id, tx_ref);
+//   }
+
+//   res.status(200).send('Webhook Received');
+// });
 
 export default router;

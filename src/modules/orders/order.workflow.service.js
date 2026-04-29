@@ -1,5 +1,6 @@
 import prisma from '../../infrastructure/database/prisma.client.js';
 import { BusinessLogicError } from '../../core/errors/domain.errors.js';
+import { PaymentService } from '../payments/payment.service.js';
 
 export class OrderWorkflowService {
   /**
@@ -36,10 +37,19 @@ export class OrderWorkflowService {
     this.authorizeTransition(order, nextStatus, actorRole, actorId);
 
     // 2. Perform Update
-    return await prisma.order.update({
+    const updated = await prisma.order.update({
       where: { id: orderId },
       data: { status: nextStatus }
     });
+
+    if (nextStatus === 'COMPLETED') {
+      // Let the payout happen asynchronously in the background. 
+      // awaiting it may block http response for the user
+      // we'll add status authorization for completing order
+      PaymentService.disimburseDelivererPayout(orderId).catch(console.error)
+    }
+
+    return updated;
   }
 
   authorizeTransition(order, nextStatus, role, actorId) {
