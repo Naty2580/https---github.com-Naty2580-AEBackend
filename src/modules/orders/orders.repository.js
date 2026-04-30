@@ -48,12 +48,14 @@ export class OrderRepository {
         restaurant: { select: { name: true, location: true, mode: true, phone: true, lat: true, lng: true } },
         customer: {
           select: {
+            userId: true, // Required for IDOR checks in service layer
             defaultLocation: true, rating: true,
             user: { select: { fullName: true, phoneNumber: true } }
           }
         },
         deliverer: {
           select: {
+            userId: true, // Required for IDOR checks in service layer
             rating: true,
             user: { select: { fullName: true, phoneNumber: true, avatarUrl: true } }
           }
@@ -66,13 +68,14 @@ export class OrderRepository {
     });
   }
 
-  async createOrderWithItems(orderData, itemsData) {
+  // userId = the User.id of the customer (needed for statusHistory FK)
+  async createOrderWithItems(orderData, itemsData, userId) {
     return await prisma.$transaction(async (tx) => {
       // 1. Create the Order
       const order = await tx.order.create({
         data: {
           shortId: orderData.shortId,
-          customerId: orderData.customerId,
+          customerId: orderData.customerId, // CustomerProfile.id
           restaurantId: orderData.restaurantId,
           foodPrice: orderData.foodPrice,
           deliveryFee: orderData.deliveryFee,
@@ -80,7 +83,6 @@ export class OrderRepository {
           transactionFee: 0.00, // Determined later by payment gateway
           tip: orderData.tip,
           totalAmount: orderData.totalAmount,
-          payoutAmount: orderData.payoutAmount,
           status: 'CREATED',
           paymentStatus: 'AWAITING_PAYMENT',
           otpCode: orderData.otpCode,
@@ -95,10 +97,11 @@ export class OrderRepository {
           },
 
           // 3. Nested write for Status History initialization
+          // changedById must be a User.id (FK to User table)
           statusHistory: {
             create: {
               newStatus: 'CREATED',
-              changedById: orderData.customerId
+              changedById: userId
             }
           }
         },
@@ -114,29 +117,25 @@ export class OrderRepository {
 
   async atomicAssignOrder(orderId, delivererId) {
     return await prisma.$transaction(async (tx) => {
-      // 1. SELECT ... FOR UPDATE (This blocks other concurrent transactions for this row)
       const order = await tx.order.findUnique({
         where: { id: orderId },
-        select: { id: true, status: true, assignedDelivererId: true },
-        // The magic: FOR UPDATE
-        _lock: 'update'
+        select: { id: true, status: true, delivererId: true }
       });
 
-      // 2. Strict Business Logic Verification
       if (!order) {
         throw new Error("Order does not exist.");
       }
 
-      if (order.status !== 'AWAITING_ACCEPT' || order.assignedDelivererId !== null) {
+      // Check the correct field name: delivererId (not assignedDelivererId)
+      if (order.status !== 'AWAITING_ACCEPT' || order.delivererId !== null) {
         throw new Error("This order has already been claimed by another deliverer.");
       }
 
-      // 3. Perform the update while holding the lock
       return await tx.order.update({
         where: { id: orderId },
         data: {
           status: 'ASSIGNED',
-          assignedDelivererId: delivererId
+          delivererId: delivererId // DelivererProfile.id
         }
       });
     });
@@ -170,11 +169,14 @@ export class OrderRepository {
     const where = {};
     if (status) where.status = status;
 
-    // Apply strict access boundaries based on the requested perspective
+    // Apply strict access boundaries based on the requested perspective.
+    // NOTE: Order.customerId holds a CustomerProfile.id (NOT a User.id).
+    //       Order.delivererId holds a DelivererProfile.id (NOT a User.id).
+    //       We must traverse the relation to filter by the User.id from the JWT.
     if (roleAs === 'CUSTOMER') {
-      where.customerId = userId;
+      where.customer = { userId: userId };
     } else if (roleAs === 'DELIVERER') {
-      where.assignedDelivererId = userId;
+      where.deliverer = { userId: userId };
     } else if (roleAs === 'VENDOR') {
       if (!restaurantId) throw new Error("restaurantId is required for Vendor views");
       where.restaurantId = restaurantId;
