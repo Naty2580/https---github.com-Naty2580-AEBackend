@@ -3,6 +3,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerDocs } from '../config/swagger.config.js';
 import { timeoutService } from "../modules/orders/timeout.service.js"
 import v1Routes from './routes.v1.js';
 import { globalErrorHandler } from './middlewares/error.middleware.js';
@@ -51,6 +53,9 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '1mb' })); // Prevent large payload DOS attacks
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
+
+// Serve Swagger Documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
 // 2. API Routing
 app.use('/api/v1', v1Routes);
