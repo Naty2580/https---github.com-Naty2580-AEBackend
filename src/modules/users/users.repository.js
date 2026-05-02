@@ -249,6 +249,42 @@ export class UserRepository {
   // ADMIN USER MANAGEMENT
   // ==========================================
 
+  async findPendingDelivererApplications({ skip = 0, take = 50 }) {
+    const where = { verificationStatus: 'PENDING' };
+    const [total, applications] = await prisma.$transaction([
+      prisma.delivererProfile.count({ where }),
+      prisma.delivererProfile.findMany({
+        where,
+        skip,
+        take,
+        include: {
+          user: {
+            select: { id: true, fullName: true, astuEmail: true, phoneNumber: true, status: true }
+          }
+        }
+      })
+    ]);
+    return { total, applications };
+  }
+
+  async findPendingVendorApplications({ skip = 0, take = 50 }) {
+    const where = { verificationStatus: 'PENDING' };
+    const [total, applications] = await prisma.$transaction([
+      prisma.vendorProfile.count({ where }),
+      prisma.vendorProfile.findMany({
+        where,
+        skip,
+        take,
+        include: {
+          user: {
+            select: { id: true, fullName: true, email: true, phoneNumber: true, status: true }
+          }
+        }
+      })
+    ]);
+    return { total, applications };
+  }
+
   async findAllUsers({ skip, take, role, status, search }) {
     const where = {};
     if (role) where.role = role;

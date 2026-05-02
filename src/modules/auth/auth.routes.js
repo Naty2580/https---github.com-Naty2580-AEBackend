@@ -74,8 +74,8 @@ router.post('/register/vendor', validate(registerVendorSchema), authController.r
  *             type: object
  *             required: [identifier, password]
  *             properties:
- *               identifier: { type: string, example: it.natnael.dev@astu.edu.et }
- *               password: { type: string, example: SecurePass123! }
+ *               identifier: { type: string, example: admin.seed@astu.edu.et }
+ *               password: { type: string, example: Password123! }
  *     responses:
  *       200: { description: Login successful }
  */

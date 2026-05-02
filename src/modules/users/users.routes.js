@@ -246,6 +246,54 @@ router.get(
 
 /**
  * @openapi
+ * /users/applications/deliverers:
+ *   get:
+ *     summary: List pending deliverer applications (Admin only)
+ *     tags: [Admin - User Management]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50 }
+ *     responses:
+ *       200: { description: List of pending deliverer applications }
+ */
+router.get(
+  '/applications/deliverers',
+  restrictTo('ADMIN'),
+  userController.getPendingDelivererApplications
+);
+
+/**
+ * @openapi
+ * /users/applications/vendors:
+ *   get:
+ *     summary: List pending vendor applications (Admin only)
+ *     tags: [Admin - User Management]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50 }
+ *     responses:
+ *       200: { description: List of pending vendor applications }
+ */
+router.get(
+  '/applications/vendors',
+  restrictTo('ADMIN'),
+  userController.getPendingVendorApplications
+);
+
+/**
+ * @openapi
  * /users/{userId}/status:
  *   patch:
  *     summary: Ban or Activate a user account (Admin only)
