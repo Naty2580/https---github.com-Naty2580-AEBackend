@@ -249,6 +249,42 @@ export class UserRepository {
   // ADMIN USER MANAGEMENT
   // ==========================================
 
+  async findPendingDelivererApplications({ skip = 0, take = 50 }) {
+    const where = { verificationStatus: 'PENDING' };
+    const [total, applications] = await prisma.$transaction([
+      prisma.delivererProfile.count({ where }),
+      prisma.delivererProfile.findMany({
+        where,
+        skip,
+        take,
+        include: {
+          user: {
+            select: { id: true, fullName: true, astuEmail: true, phoneNumber: true, status: true }
+          }
+        }
+      })
+    ]);
+    return { total, applications };
+  }
+
+  async findPendingVendorApplications({ skip = 0, take = 50 }) {
+    const where = { verificationStatus: 'PENDING' };
+    const [total, applications] = await prisma.$transaction([
+      prisma.vendorProfile.count({ where }),
+      prisma.vendorProfile.findMany({
+        where,
+        skip,
+        take,
+        include: {
+          user: {
+            select: { id: true, fullName: true, email: true, phoneNumber: true, status: true }
+          }
+        }
+      })
+    ]);
+    return { total, applications };
+  }
+
   async findAllUsers({ skip, take, role, status, search }) {
     const where = {};
     if (role) where.role = role;
@@ -277,7 +313,23 @@ export class UserRepository {
           fullName: true,
           role: true,
           status: true,
-          createdAt: true
+          createdAt: true,
+          customerProfile: {
+            select: { totalOrders: true }
+          },
+          delivererProfile: {
+            select: { 
+              verificationStatus: true, 
+              isOnline: true, 
+              isAvailable: true, 
+              rating: true, 
+              totalDeliveries: true, 
+              totalEarnings: true 
+            }
+          },
+          vendorProfile: {
+            include: { restaurant: { select: { name: true } } }
+          }
         }
       })
     ]);

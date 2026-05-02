@@ -162,8 +162,11 @@ export class OrderService {
   }
 
   _sanitizeOrderPayload(order, userRole) {
-    // 1. Handshake Security: ONLY the Customer can ever see the OTP code.
-    if (userRole !== 'CUSTOMER') {
+    // 1. Handshake Security: ONLY the Customer and Admin can see the OTP code.
+    //    - CUSTOMER: needs it to confirm delivery handshake
+    //    - ADMIN: needs it for support/dispute resolution
+    //    - VENDOR_STAFF / DELIVERER: must never see it
+    if (userRole !== 'CUSTOMER' && userRole !== 'ADMIN') {
       order.otpCode = undefined;
     }
 
@@ -309,97 +312,102 @@ export class OrderService {
     });
   }
 
-  // async checkout(customerId, data) {
+  async checkout(userId, data) {
+    // CRITICAL: Order.customerId is a CustomerProfile.id, NOT a User.id.
+    // We must look up the profile first to get the correct FK.
+    const customerProfile = await prisma.customerProfile.findUnique({
+      where: { userId }
+    });
+    if (!customerProfile) {
+      throw new NotFoundError('Customer profile not found. Please complete your profile setup.');
+    }
 
-  //   const sanitizedItems = this._aggregateCartItems(data.items);
-  //   const requestedItemIds = sanitizedItems.map(i => i.menuId);
+    const sanitizedItems = this._aggregateCartItems(data.items);
+    const requestedItemIds = sanitizedItems.map(i => i.menuId);
 
-  //   // 1. Fetch & Verify Restaurant
-  //   const restaurant = await this.restaurantRepository.findById(data.restaurantId);
-  //   if (!restaurant || !restaurant.isActive) {
-  //     throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
-  //   }
+    // 1. Fetch & Verify Restaurant
+    const restaurant = await this.restaurantRepository.findById(data.restaurantId);
+    if (!restaurant || !restaurant.isActive) {
+      throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
+    }
 
-  //   const isOpen = isCurrentlyOpen(restaurant.openingTime, restaurant.closingTime);
-  //   if (!restaurant.isOpen || !isOpen) {
-  //     throw new BusinessLogicError(ORDER_ERRORS.RESTAURANT_CLOSED);
-  //   }
+    const isOpen = isCurrentlyOpen(restaurant.openingTime, restaurant.closingTime);
+    if (!restaurant.isOpen || !isOpen) {
+      throw new BusinessLogicError(ORDER_ERRORS.RESTAURANT_CLOSED);
+    }
 
-  //   // 2. Geospatial Fencing (1.8km radius)
-  //   const distanceMeters = calculateDistance(
-  //     restaurant.lat, restaurant.lng,
-  //     data.deliveryLat, data.deliveryLng
-  //   );
-  //   if (distanceMeters > CAMPUS_CONFIG.MAX_RADIUS_METERS) {
-  //     throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
-  //   }
+    // 2. Geospatial Fencing (1.8km radius)
+    const distanceMeters = calculateDistance(
+      restaurant.lat, restaurant.lng,
+      data.deliveryLat, data.deliveryLng
+    );
+    if (distanceMeters > CAMPUS_CONFIG.MAX_RADIUS_METERS) {
+      throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
+    }
 
-  //   // 3. Fetch & Verify Menu Items
+    // 3. Fetch & Verify Menu Items
+    const validItems = await this.orderRepository.fetchActiveMenuItems(data.restaurantId, requestedItemIds);
 
-  //   const validItems = await this.orderRepository.fetchActiveMenuItems(data.restaurantId, requestedItemIds);
+    if (validItems.length !== requestedItemIds.length) {
+      throw new BusinessLogicError('Some items are no longer available or do not belong to this restaurant.');
+    }
 
-  //   if (validItems.length !== requestedItemIds.length) {
-  //     throw new BusinessLogicError('Some items are no longer available or do not belong to this restaurant.');
-  //   }
+    // 4. Calculate Subtotal (Using Database Prices, ignoring frontend manipulation)
+    let foodPrice = 0;
+    const validatedItemsData = sanitizedItems.map(reqItem => {
+      const dbItem = validItems.find(vi => vi.id === reqItem.menuId);
+      const actualDbPrice = Number(dbItem.price);
 
-  //   // 4. Calculate Subtotal (Using Database Prices, ignoring frontend manipulation)
-  //   let foodPrice = 0;
-  //   const validatedItemsData = sanitizedItems.map(reqItem => {
-  //     const dbItem = validItems.find(vi => vi.id === reqItem.menuId);
-  //     const actualDbPrice = Number(dbItem.price);
+      // Prevent Phantom Price Change Attack
+      if (actualDbPrice !== reqItem.expectedUnitPrice) {
+        throw new ConflictError(
+          `Price mismatch on item "${dbItem.name}". The menu price has changed. Please refresh your cart.`
+        );
+      }
 
-  //     // Prevent Phantom Price Change Attack
-  //     if (actualDbPrice !== reqItem.expectedUnitPrice) {
-  //       throw new ConflictError(
-  //         `Price mismatch on item "${dbItem.name}". The menu price has changed. Please refresh your cart.`
-  //       );
-  //     }
+      const itemSubtotal = actualDbPrice * reqItem.quantity;
+      foodPrice += itemSubtotal;
+      return {
+        menuId: reqItem.menuId,
+        quantity: reqItem.quantity,
+        unitPrice: actualDbPrice
+      };
+    });
 
-  //     const itemSubtotal = actualDbPrice * reqItem.quantity;
-  //     foodPrice += itemSubtotal;
-  //     return {
-  //       menuId: reqItem.menuId,
-  //       quantity: reqItem.quantity,
-  //       unitPrice: actualDbPrice
-  //     };
-  //   });
+    if (foodPrice < Number(restaurant.minOrderValue)) {
+      throw new BusinessLogicError(`Minimum order value is ${restaurant.minOrderValue} ETB.`);
+    }
 
-  //   if (foodPrice < Number(restaurant.minOrderValue)) {
-  //     throw new BusinessLogicError(`Minimum order value is ${restaurant.minOrderValue} ETB.`);
-  //   }
+    // 5. Calculate Financials
+    const deliveryFee = calculateDeliveryFee(distanceMeters);
+    const serviceFee = calculateServiceFee(foodPrice);
+    const tip = data.tip;
 
-  //   // 5. Calculate Financials
-  //   const deliveryFee = calculateDeliveryFee(distanceMeters);
-  //   const serviceFee = calculateServiceFee(foodPrice);
-  //   const tip = data.tip;
+    const totalAmount = Number((foodPrice + deliveryFee + serviceFee + tip).toFixed(2));
 
-  //   const totalAmount = Number((foodPrice + deliveryFee + serviceFee + tip).toFixed(2));
-  //   const payoutAmount = Number((foodPrice + deliveryFee + tip).toFixed(2)); // Platform keeps service fee
+    // 6. Assemble Order Payload
+    // customerId = CustomerProfile.id (the correct FK for Order.customerId)
+    const orderPayload = {
+      shortId: generateShortId(),
+      customerId: customerProfile.id,
+      restaurantId: data.restaurantId,
+      foodPrice,
+      deliveryFee,
+      serviceFee,
+      tip,
+      totalAmount,
+      otpCode: generateOTP() // Handshake code for final delivery verification
+    };
 
-  //   // 6. Assemble Order Payload
-  //   const orderPayload = {
-  //     shortId: generateShortId(),
-  //     customerId,
-  //     restaurantId: data.restaurantId,
-  //     foodPrice,
-  //     deliveryFee,
-  //     serviceFee,
-  //     tip,
-  //     totalAmount,
-  //     payoutAmount,
-  //     otpCode: generateOTP() // Handshake code for final delivery verification
-  //   };
+    // 7. Persist Transactionally
+    // Pass userId (User.id) separately so the statusHistory FK is correctly set
+    const newOrder = await this.orderRepository.createOrderWithItems(orderPayload, validatedItemsData, userId);
 
-  //   // 7. Persist Transactionally
-  //   const newOrder = await this.orderRepository.createOrderWithItems(orderPayload, validatedItemsData);
+    timeoutService.scheduleBroadcastTimeout(newOrder.id, userId);
+    this.dispatchService.broadcastNewOrder(newOrder).catch(console.error);
 
-  //   timeoutService.scheduleBroadcastTimeout(newOrder.id, customerId);
-  //   this.dispatchService.broadcastNewOrder(newOrder).catch(console.error);
-
-  //   return newOrder;
-
-
-  // }
+    return newOrder;
+  }
 
   async getOrderDetails(userId, userRole, orderId) {
     const order = await this.orderRepository.findById(orderId);
@@ -425,83 +433,9 @@ export class OrderService {
 
   }
 
-  async createOrder(customerId, data) {
-    // 1. Fetch dependencies and validate restaurant status
-    const restaurant = await this.restaurantRepository.findById(data.restaurantId);
-    if (!restaurant?.isOpen) throw new BusinessLogicError("Restaurant is currently closed.");
-
-    // 2. Validate items and calculate subtotals (fetch actual prices from DB)
-    const menuItems = await prisma.menuItem.findMany({
-      where: { id: { in: data.items.map(i => i.menuId) }, restaurantId: data.restaurantId }
-    });
-
-    if (menuItems.length !== data.items.length) throw new BusinessLogicError("Some items are invalid.");
-
-    const subtotal = data.items.reduce((acc, item) => {
-      const price = menuItems.find(m => m.id === item.menuId).price;
-      return acc + (Number(price) * item.quantity);
-    }, 0);
-
-    // 3. Calculate Fees
-    const financials = this.pricingService.calculateTotals(subtotal, 500, data.tip); // 500m as default distance
-
-    // 4. Atomic Transaction
-    return await prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({
-        data: {
-          shortId: `AE-${Math.floor(1000 + Math.random() * 9000)}`,
-          customerId,
-          restaurantId: data.restaurantId,
-          ...financials,
-          items: {
-            create: data.items.map(item => ({
-              menuId: item.menuId,
-              quantity: item.quantity,
-              unitPrice: menuItems.find(m => m.id === item.menuId).price
-            }))
-          }
-        }
-      });
-
-      // Initial state history log
-      await tx.orderStatusHistory.create({
-        data: { orderId: order.id, newStatus: 'CREATED', changedById: customerId }
-      });
-
-      return order;
-    });
-  }
-
   /**
-   * Enforces State Machine rules
+   * Enforces State Machine rules (kept for compatibility — prefer updateVendorState / updateDelivererState)
    */
-  async transitionStatus(orderId, nextStatus, userId) {
-    return await prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({ where: { id: orderId } });
-
-      if (!this.isValidTransition(order.status, nextStatus)) {
-        throw new BusinessLogicError(`Cannot transition from ${order.status} to ${nextStatus}`);
-      }
-
-      const updatedOrder = await tx.order.update({
-        where: { id: orderId },
-        data: { status: nextStatus }
-      });
-
-      // Log the history for audit trail
-      await tx.orderStatusHistory.create({
-        data: {
-          orderId,
-          newStatus,
-          oldStatus: order.status,
-          changedById: userId
-        }
-      });
-
-      return updatedOrder;
-    });
-  }
-
   async cancelOrder(actorId, userRole, orderId, reason) {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);

@@ -65,6 +65,10 @@ async function main() {
   const delivererIds = Array.from({ length: 6 }, () => crypto.randomUUID());
   const customerIds = Array.from({ length: 15 }, () => crypto.randomUUID());
   const restaurantIds = Array.from({ length: 4 }, () => crypto.randomUUID());
+  
+  // Pending Applications
+  const pendingDelivererIds = Array.from({ length: 3 }, () => crypto.randomUUID());
+  const pendingVendorIds = Array.from({ length: 2 }, () => crypto.randomUUID());
 
   // 4. SEED USERS
   console.log('👤 Seeding Users...');
@@ -86,6 +90,16 @@ async function main() {
     ...customerIds.map((id, i) => ({ 
       id, telegramId: generateTelegramId(), astuEmail: `student${i+1}.seed@astu.edu.et`, fullName: `Astu Student ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'CUSTOMER', activeMode: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true 
     })),
+    
+    // Pending Deliverer Applications (Role: CUSTOMER until approved)
+    ...pendingDelivererIds.map((id, i) => ({ 
+      id, telegramId: generateTelegramId(), astuEmail: `pending_del${i+1}.seed@astu.edu.et`, fullName: `Applicant Deliverer ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'CUSTOMER', activeMode: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true 
+    })),
+    
+    // Pending Vendor Applications (Role: CUSTOMER until approved)
+    ...pendingVendorIds.map((id, i) => ({ 
+      id, telegramId: generateTelegramId(), email: `pending_ven${i+1}.seed@business.com`, fullName: `Applicant Vendor ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'CUSTOMER', activeMode: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true 
+    })),
   ];
   await prisma.user.createMany({ data: allUsers });
 
@@ -105,6 +119,14 @@ async function main() {
     verificationStatus: 'APPROVED', isVerified: true, isAvailable: true, rating: (Math.random() * (5.0 - 4.0) + 4.0).toFixed(1)
   }));
   await prisma.delivererProfile.createMany({ data: delivererProfiles });
+
+  // Pending Deliverer Profiles
+  const pendingDelivererProfiles = pendingDelivererIds.map((id, i) => ({
+    userId: id,
+    payoutProvider: i % 2 === 0 ? 'TELEBIRR' : 'CBE_BIRR', payoutAccount: `09${Math.floor(10000000 + Math.random() * 90000000)}`,
+    verificationStatus: 'PENDING', isVerified: false, isAvailable: false, rating: 5.0
+  }));
+  await prisma.delivererProfile.createMany({ data: pendingDelivererProfiles });
 
   // 6. SEED RESTAURANTS
   console.log('🏪 Seeding Restaurants...');
@@ -126,6 +148,15 @@ async function main() {
     businessDocumentUrl: `https://placehold.co/600x400?text=License+${i}`
   }));
   await prisma.vendorProfile.createMany({ data: vendorProfiles });
+
+  // Pending Vendor Profiles
+  const pendingVendorProfiles = pendingVendorIds.map((id, i) => ({
+    userId: id, 
+    isOwner: true,
+    verificationStatus: 'PENDING', 
+    businessDocumentUrl: `https://placehold.co/600x400?text=Pending+License+${i}`
+  }));
+  await prisma.vendorProfile.createMany({ data: pendingVendorProfiles });
 
   // 8. SEED MENUS & CATEGORIES
   console.log('🍔 Seeding Categories & Menu Items...');

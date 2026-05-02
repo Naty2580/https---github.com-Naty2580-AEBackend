@@ -182,6 +182,28 @@ export const listUsers = async (req, res, next) => {
   }
 };
 
+export const getPendingDelivererApplications = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const result = await userService.listPendingDelivererApplications(page, limit);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getPendingVendorApplications = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const result = await userService.listPendingVendorApplications(page, limit);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const updateUserStatus = async (req, res, next) => {
   try {
     const { userId } = req.params;

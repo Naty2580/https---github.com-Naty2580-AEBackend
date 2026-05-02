@@ -260,6 +260,16 @@ export class UserService {
     });
   }
 
+  async listPendingDelivererApplications(page = 1, limit = 50) {
+    const skip = (page - 1) * limit;
+    return await this.userRepository.findPendingDelivererApplications({ skip, take: limit });
+  }
+
+  async listPendingVendorApplications(page = 1, limit = 50) {
+    const skip = (page - 1) * limit;
+    return await this.userRepository.findPendingVendorApplications({ skip, take: limit });
+  }
+
    async updatePayoutDetails(userId, data) {
     const user = await this.userRepository.findByIdWithProfiles(userId);
     if (!user.delivererProfile) throw new BusinessLogicError('Deliverer profile not found.');
