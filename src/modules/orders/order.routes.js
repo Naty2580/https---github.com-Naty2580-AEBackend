@@ -4,7 +4,7 @@ import { restrictTo } from '../../api/middlewares/rbac.middleware.js';
 import * as orderController from './order.controller.js';
 import { validate } from '../../api/middlewares/validate.middleware.js';
 import { checkoutSchema, cancelOrderSchema, orderQuerySchema, 
-  updateVendorStateSchema, updateDelivererStateSchema, completeOrderSchema, dropOrderSchema, raiseDisputeSchema  } from './orders.dto.js';
+  updateVendorStateSchema, updateDelivererStateSchema, completeOrderSchema, dropOrderSchema, raiseDisputeSchema, quoteSchema, createReviewSchema , reportUnfulfillableSchema } from './orders.dto.js';
   import { resolveDisputeSchema, retryPayoutSchema } from '../ledger/ledger.dto.js';
 
 const router = Router(); 
@@ -158,9 +158,16 @@ router.patch(
  */
 router.post(
   '/:id/confirm-handshake', 
-  restrictTo('CUSTOMER', 'DELIVERER', 'ADMIN'), // Deliverers/Admins as customers
+  restrictTo('DELIVERER', 'ADMIN'), 
   validate(completeOrderSchema), 
-  orderController.customerConfirmOTP
+  orderController.completeWithOTP
+);
+
+router.post(
+  '/:id/unfulfillable',
+  restrictTo('DELIVERER'),
+  validate(reportUnfulfillableSchema),
+  orderController.reportUnfulfillable
 );
 
 // Deliverer accepting an order
@@ -346,7 +353,7 @@ router.patch('/:id/status', orderController.updateStatus);
  */
 router.post(
   '/checkout', 
-  restrictTo('CUSTOMER', 'DELIVERER', 'ADMIN'), 
+  restrictTo('CUSTOMER', 'ADMIN'), // Remember: Deliverers & Admins can order food too
   validate(checkoutSchema), 
   orderController.checkout
 );
@@ -466,5 +473,11 @@ router.post(
   validate(retryPayoutSchema),
   orderController.retryPayout
 );
+
+// NEW: Pre-Checkout Quote
+router.post('/quote', restrictTo('CUSTOMER', 'DELIVERER', 'ADMIN'), validate(quoteSchema), orderController.getQuote);
+
+// NEW: Post-Delivery Review
+router.post('/:id/review', restrictTo('CUSTOMER', 'DELIVERER', 'ADMIN'), validate(createReviewSchema), orderController.submitReview);
 
 export default router;

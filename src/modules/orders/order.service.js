@@ -1,6 +1,6 @@
 import prisma from '../../infrastructure/database/prisma.client.js';
 import { RestaurantRepository } from '../restaurants/restaurant.repository.js';
-import { NotFoundError, BusinessLogicError, ForbiddenError } from '../../core/errors/domain.errors.js';
+import { NotFoundError, BusinessLogicError, ForbiddenError, ConflictError } from '../../core/errors/domain.errors.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { ORDER_ERRORS } from '../../core/errors/error.codes.js';
 import { CAMPUS_CONFIG } from '../../config/fee.config.js';
@@ -13,6 +13,8 @@ import { timeoutService } from './timeout.service.js';
 import { DispatchService } from '../dispatch/dispatch.service.js';
 import { socketManager } from '../../infrastructure/websockets/socket.manager.js';
 import { PayoutService } from '../payouts/payout.service.js';
+import { fraudService } from '../fraud/fraud.service.js';
+
 
 
 export class OrderService {
@@ -25,24 +27,138 @@ export class OrderService {
     this.payoutService = new PayoutService();
   }
 
+  async _getActorProfiles(userId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        customerProfile: { select: { id: true } },
+        delivererProfile: { select: { id: true } }
+      }
+    });
+    return {
+      customerId: user?.customerProfile?.id,
+      delivererId: user?.delivererProfile?.id
+    };
+  }
+
   _aggregateCartItems(items) {
     const aggregated = {};
     for (const item of items) {
       if (aggregated[item.menuId]) {
-        // Ensure that if a duplicate item is sent, the expected prices match
-        if (aggregated[item.menuId].expectedUnitPrice !== item.expectedUnitPrice) {
+        if (Number(aggregated[item.menuId].expectedUnitPrice) !== Number(item.expectedUnitPrice)) {
           throw new BusinessLogicError("Inconsistent pricing found in cart items.");
         }
         aggregated[item.menuId].quantity += item.quantity;
       } else {
-        aggregated[item.menuId] = {
-          menuId: item.menuId,
+        aggregated[item.menuId] = { 
+          menuId: item.menuId, 
           quantity: item.quantity,
-          expectedUnitPrice: item.expectedUnitPrice // Preserve expectation
+          expectedUnitPrice: Number(item.expectedUnitPrice)
         };
       }
     }
     return Object.values(aggregated);
+  }
+
+  async calculateQuote(data) {
+    const sanitizedItems = this._aggregateCartItems(data.items);
+    const requestedItemIds = sanitizedItems.map(i => i.menuId);
+
+    const restaurant = await this.restaurantRepository.findById(data.restaurantId);
+    if (!restaurant || !restaurant.isActive) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
+
+    const distanceMeters = calculateDistance(restaurant.lat, restaurant.lng, data.deliveryLat, data.deliveryLng);
+    if (distanceMeters > CAMPUS_CONFIG.MAX_RADIUS_METERS) throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
+
+    const validItems = await this.orderRepository.fetchActiveMenuItems(data.restaurantId, requestedItemIds);
+    if (validItems.length !== requestedItemIds.length) throw new BusinessLogicError(ORDER_ERRORS.INVALID_ITEMS);
+
+    let foodPrice = 0;
+    sanitizedItems.forEach(reqItem => {
+      const dbItem = validItems.find(vi => vi.id === reqItem.menuId);
+      
+      // CRITICAL FIX: Ensure both sides of the equation are Numbers before comparing
+      const actualDbPrice = Number(dbItem.price);
+      
+      if (actualDbPrice !== reqItem.expectedUnitPrice) {
+        throw new ConflictError(`Price mismatch on item "${dbItem.name}".`);
+      }
+      foodPrice += actualDbPrice * reqItem.quantity;
+    });
+
+    if (foodPrice < Number(restaurant.minOrderValue)) {
+      throw new BusinessLogicError(`Minimum order is ${restaurant.minOrderValue} ETB.`);
+    }
+
+    const deliveryFee = calculateDeliveryFee(distanceMeters);
+    const serviceFee = calculateServiceFee(foodPrice);
+    const tip = data.tip || 0;
+    
+    return {
+      distanceMeters, foodPrice, deliveryFee, serviceFee, tip,
+      totalAmount: Number((foodPrice + deliveryFee + serviceFee + tip).toFixed(2)),
+      payoutAmount: Number((foodPrice + deliveryFee + tip).toFixed(2))
+    };
+  }
+
+  async checkout(userId, data) {
+
+   const profiles = await this._getActorProfiles(userId);
+    if (!profiles.customerId) throw new BusinessLogicError("Customer profile not found.");
+
+
+    const sanitizedItems = this._aggregateCartItems(data.items);
+    const requestedItemIds = sanitizedItems.map(i => i.menuId);
+
+    const restaurant = await this.restaurantRepository.findById(data.restaurantId);
+    if (!restaurant || !restaurant.isActive) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
+
+    const isOpen = isCurrentlyOpen(restaurant.openingTime, restaurant.closingTime);
+    if (!restaurant.isOpen || !isOpen) throw new BusinessLogicError(ORDER_ERRORS.RESTAURANT_CLOSED);
+
+    const distanceMeters = calculateDistance(restaurant.lat, restaurant.lng, data.deliveryLat, data.deliveryLng);
+    if (distanceMeters > CAMPUS_CONFIG.MAX_RADIUS_METERS) throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
+
+    const validItems = await this.orderRepository.fetchActiveMenuItems(data.restaurantId, requestedItemIds);
+    if (validItems.length !== requestedItemIds.length) throw new BusinessLogicError(ORDER_ERRORS.INVALID_ITEMS);
+
+    let foodPrice = 0;
+    const validatedItemsData = sanitizedItems.map(reqItem => {
+      const dbItem = validItems.find(vi => vi.id === reqItem.menuId);
+      
+      // CRITICAL FIX: Ensure strict Number casting
+      const actualDbPrice = Number(dbItem.price);
+
+      if (actualDbPrice !== reqItem.expectedUnitPrice) {
+        throw new ConflictError(`Price mismatch on item "${dbItem.name}".`);
+      }
+
+      foodPrice += actualDbPrice * reqItem.quantity;
+      return { menuId: reqItem.menuId, quantity: reqItem.quantity, unitPrice: actualDbPrice };
+    });
+
+    if (foodPrice < Number(restaurant.minOrderValue)) throw new BusinessLogicError(`Minimum order value is ${restaurant.minOrderValue} ETB.`);
+
+    const deliveryFee = calculateDeliveryFee(distanceMeters);
+    const serviceFee = calculateServiceFee(foodPrice);
+    const tip = data.tip || 0.00;
+    const totalAmount = Number((foodPrice + deliveryFee + serviceFee + tip).toFixed(2));
+    const payoutAmount = Number((foodPrice + deliveryFee + tip).toFixed(2));
+
+
+    const orderPayload = {
+      shortId: generateShortId(),
+      customerId: profiles.customerId,
+      userId: userId,
+      restaurantId: data.restaurantId,
+      foodPrice, deliveryFee, serviceFee, tip, totalAmount, payoutAmount,
+      otpCode: generateOTP()
+    };
+
+    const newOrder = await this.orderRepository.createOrderWithItems(orderPayload, validatedItemsData);
+    timeoutService.scheduleBroadcastTimeout(newOrder.id, userId);
+
+    return newOrder;
   }
 
   _sanitizeOrderPayload(order, userRole) {
@@ -93,7 +209,7 @@ export class OrderService {
     });
   }
 
-  async _verifyTransitionRules(order, targetStatus, allowedRoles, userRole, userId) {
+  async _verifyTransitionRules(order, targetStatus, allowedRoles, userRole, userId, profiles) {
     if (!allowedRoles.includes(userRole)) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
@@ -127,7 +243,7 @@ export class OrderService {
       const access = await this.restaurantRepository.checkVendorAccess(userId, order.restaurantId);
       if (!access) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
-    if (userRole === 'DELIVERER' && order.assignedDelivererId !== userId) {
+     if (userRole === 'DELIVERER' && order.delivererId !== profiles.delivererId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
   }
@@ -297,13 +413,14 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    // Strict IDOR Protection: You can only view an order if you are involved in it.
-    // IMPORTANT: order.customerId is a CustomerProfile.id, order.delivererId is a DelivererProfile.id.
-    // We compare against customer.userId / deliverer.userId (resolved via the included relations).
-    if (userRole === 'CUSTOMER' && order.customer?.userId !== userId) {
+    // Strict IDOR Protection: You can only view an order if you are involved in it
+     const profiles = await this._getActorProfiles(userId);
+
+    if (userRole === 'CUSTOMER' && order.customerId !== profiles.customerId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
-    if (userRole === 'DELIVERER' && order.deliverer?.userId !== userId) {
+    // CRITICAL FIX: Compare against delivererProfile.id
+    if (userRole === 'DELIVERER' && order.delivererId !== profiles.delivererId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
     if (userRole === 'VENDOR_STAFF') {
@@ -323,8 +440,10 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    // IDOR & Role Checks
-    if (userRole === 'CUSTOMER' && order.customer?.userId !== actorId) {
+    const profiles = await this._getActorProfiles(actorId);
+
+    // FIX: Use profile check
+    if (userRole === 'CUSTOMER' && order.customerId !== profiles.customerId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
     if (userRole === 'VENDOR_STAFF') {
@@ -349,6 +468,9 @@ export class OrderService {
 
       // 2. Immediate Escrow Reversal
       if (order.paymentStatus === 'CAPTURED') {
+
+        fraudService.checkRefundAbuse(order.customerId).catch(console.error);
+
         // Mark payment as refunded in the DB
         await prisma.order.update({
           where: { id: orderId },
@@ -359,6 +481,10 @@ export class OrderService {
         await this.ledgerService.processFinancialEvent(
           order, 'REFUND', order.totalAmount, order.customerId
         );
+
+        import('../../infrastructure/payment/chapa.adapter.js').then(({ ChapaAdapter }) => {
+          ChapaAdapter.issueRefund(order.chapaRef, order.totalAmount).catch(console.error);
+        });
       }
 
       // REAL-TIME PUSH: Alert anyone watching this order
@@ -376,9 +502,14 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    if (order.assignedDelivererId !== delivererId) {
+     const profiles = await this._getActorProfiles(delivererId);
+
+    // FIX: Compare against DelivererProfile.id
+    if (order.delivererId !== profiles.delivererId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
+
+    fraudService.checkDelivererCancelRate(delivererId).catch(console.error);
 
     const droppableStates = ['ASSIGNED', 'AWAITING_PAYMENT', 'PAYMENT_RECEIVED'];
     if (!droppableStates.includes(order.status)) {
@@ -404,19 +535,24 @@ export class OrderService {
     }
   }
 
-  async updateVendorState(userId, userRole, orderId, status) {
+  async updateVendorState(userId, userRole, orderId, status, estimatedPrepTimeMins) {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
     await this._verifyTransitionRules(order, status, ['VENDOR_STAFF', 'ADMIN'], userRole, userId);
 
     try {
+       if (status === 'VENDOR_BEING_PREPARED' && estimatedPrepTimeMins) {
+        await this.orderRepository.transitionOrderStatusWithETA(
+          orderId, order.status, status, userId, estimatedPrepTimeMins
+        );
+      } else {
       // Execute OCC Transition
       await this.orderRepository.transitionOrderStatus(orderId, order.status, status, userId);
 
       // REAL-TIME PUSH: Notify Customer and Deliverer
       this._emitOrderUpdate(orderId, status, `Vendor has updated the order status to: ${status}`);
-
+      }
     } catch (error) {
       if (error.message === 'STATE_CONFLICT') {
         throw new ConflictError("Order state was modified by another request. Please refresh.");
@@ -425,11 +561,13 @@ export class OrderService {
     }
   }
 
-  async updateDelivererState(userId, userRole, orderId, status) {
+  async updateDelivererState(userId, userRole, orderId, status, currentLat, currentLng) {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    await this._verifyTransitionRules(order, status, ['DELIVERER', 'ADMIN'], userRole, userId);
+    const profiles = await this._getActorProfiles(userId);
+       
+    await this._verifyTransitionRules(order, status, ['DELIVERER', 'ADMIN'], userRole, userId, profiles);
 
     try {
       // If Deliverer marks DELIVERED, and Customer already marked RECEIVED, finalize immediately.
@@ -437,6 +575,10 @@ export class OrderService {
          await this.orderRepository.finalizeOrderAndTriggerPayout(
           orderId, 'RECEIVED', userId, this.payoutService
         );
+
+      if (status === 'PICKED_UP') {
+      fraudService.checkGPSMismatch(orderId, currentLat, currentLng).catch(console.error);
+    }
 
         this._emitOrderUpdate(orderId, 'COMPLETED', `Order fully complete. Escrow released.`);
 
@@ -459,35 +601,30 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    if (order.customerId !== userId) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
+    //fetch delivererId from userId
+    const delivererId = await this._getActorProfiles(userId).then((profiles) => profiles.delivererId);
+    // IDOR Check: Only the assigned deliverer can submit the OTP
+    if (order.delivererId !== delivererId) {
+      throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
+    }
 
-    if (order.status !== 'ARRIVED' && order.status !== 'DELIVERED') {
-      throw new BusinessLogicError("Order is not ready for handover.");
+    if (order.status !== 'ARRIVED' && order.status !== 'EN_ROUTE') {
+      throw new BusinessLogicError("Order must be in transit or arrived to complete handover.");
     }
 
     if (order.otpCode !== otpCode) {
-      throw new BusinessLogicError("Invalid Delivery Handshake OTP.");
+      throw new BusinessLogicError("Invalid PIN code. Please check the customer's screen.");
     }
 
     try {
+      await this.orderRepository.executeCryptographicHandshake(
+        orderId, order.status, userId,delivererId, this.payoutService
+      );
 
-      if (order.status === 'DELIVERER') {
-        // OCC transition from RECEIVED to COMPLETED
-        await this.orderRepository.finalizeOrderAndTriggerPayout(
-          orderId, 'DELIVERER', userId, this.payoutService
-        );
-
-        this._emitOrderUpdate(orderId, 'COMPLETED', `Order fully complete. Escrow released.`);
-        return;
-      }
-
-      // Otherwise, just mark RECEIVED and wait for the deliverer to mark DELIVERED
-      await this.orderRepository.markCustomerReceivedOCC(orderId, order.status, userId);
-      this._emitOrderUpdate(orderId, 'RECEIVED', `Customer confirmed receipt.`);
-
+      this._emitOrderUpdate(orderId, 'COMPLETED', `Delivery confirmed. Escrow released.`);
     } catch (error) {
       if (error.message === 'STATE_CONFLICT') {
-        throw new ConflictError("Order state was modified concurrently. Please check order status.");
+        throw new ConflictError("Order state changed concurrently. Please check order status.");
       }
       throw error;
     }
@@ -518,6 +655,43 @@ export class OrderService {
         throw new ConflictError("Order state changed. Please refresh.");
       }
       throw error;
+    }
+  }
+
+   async reportUnfulfillable(delivererId, orderId, reasonEnum, details) {
+    const order = await this.orderRepository.findById(orderId);
+    if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
+
+    const profiles = await this._getActorProfiles(delivererId);
+
+    // FIX: Profile check
+    if (order.delivererId !== profiles.delivererId) {
+      throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
+    }
+
+    // A deliverer can only claim it's unfulfillable BEFORE they pick it up.
+    // If they already picked it up, they possess the food, so they must use the Dispute system instead.
+    const prePickupStates = ['ASSIGNED', 'AWAITING_PAYMENT', 'PAYMENT_RECEIVED', 'VENDOR_BEING_PREPARED', 'VENDOR_READY_FOR_PICKUP'];
+    
+    if (!prePickupStates.includes(order.status)) {
+      throw new BusinessLogicError("Cannot report order as unfulfillable after food has been picked up. Please raise a dispute.");
+    }
+
+    try {
+      await this.orderRepository.markUnfulfillable(orderId, delivererId, reasonEnum, details);
+
+      // Refund the Escrow if the customer had already paid
+      if (order.paymentStatus === 'CAPTURED') {
+        await prisma.order.update({ where: { id: orderId }, data: { paymentStatus: 'REFUNDED' } });
+        await this.ledgerService.processFinancialEvent(
+          order, 'REFUND', order.totalAmount, order.customerId
+        );
+      }
+
+      this._emitOrderUpdate(orderId, 'CANCELLED', `Order cancelled by deliverer. Reason: ${reasonEnum}`);
+
+    } catch (error) {
+      throw new ConflictError("Failed to report issue. Please refresh the order state.");
     }
   }
 
@@ -643,6 +817,66 @@ export class OrderService {
     // Attempt payout outside of a strict transaction to prevent locking the whole DB
     // The PayoutService handles its own internal idempotency check.
     await this.payoutService.executeDelivererPayout(order);
+  }
+
+  //  async calculateQuote(data) {
+  //   const sanitizedItems = this._aggregateCartItems(data.items);
+  //   const requestedItemIds = sanitizedItems.map(i => i.menuId);
+
+  //   const restaurant = await this.restaurantRepository.findById(data.restaurantId);
+  //   if (!restaurant || !restaurant.isActive) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
+
+  //   const distanceMeters = calculateDistance(restaurant.lat, restaurant.lng, data.deliveryLat, data.deliveryLng);
+  //   if (distanceMeters > CAMPUS_CONFIG.MAX_RADIUS_METERS) throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
+
+  //   const validItems = await this.orderRepository.fetchActiveMenuItems(data.restaurantId, requestedItemIds);
+  //   if (validItems.length !== requestedItemIds.length) throw new BusinessLogicError(ORDER_ERRORS.INVALID_ITEMS);
+
+  //   let foodPrice = 0;
+  //   sanitizedItems.forEach(reqItem => {
+  //     const dbItem = validItems.find(vi => vi.id === reqItem.menuId);
+  //     if (Number(dbItem.price) !== reqItem.expectedUnitPrice) {
+  //       throw new ConflictError(`Price mismatch on item "${dbItem.name}".`);
+  //     }
+  //     foodPrice += Number(dbItem.price) * reqItem.quantity;
+  //   });
+
+  //   if (foodPrice < Number(restaurant.minOrderValue)) {
+  //     throw new BusinessLogicError(`Minimum order is ${restaurant.minOrderValue} ETB.`);
+  //   }
+
+  //   const deliveryFee = calculateDeliveryFee(distanceMeters);
+  //   const serviceFee = calculateServiceFee(foodPrice);
+  //   const tip = data.tip || 0;
+    
+  //   return {
+  //     distanceMeters,
+  //     foodPrice,
+  //     deliveryFee,
+  //     serviceFee,
+  //     tip,
+  //     totalAmount: Number((foodPrice + deliveryFee + serviceFee + tip).toFixed(2)),
+  //     payoutAmount: Number((foodPrice + deliveryFee + tip).toFixed(2))
+  //   };
+  // }
+
+  /**
+   * NEW: Review Submission
+   */
+  async submitReview(customerId, orderId, data) {
+    const order = await this.orderRepository.findById(orderId);
+    if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
+
+    if (order.customerId !== customerId) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
+    if (order.status !== 'COMPLETED') throw new BusinessLogicError("Can only review completed orders.");
+
+    // Ensure they haven't already reviewed it
+    const existingReview = await prisma.review.findUnique({ where: { orderId } });
+    if (existingReview) throw new ConflictError("Order has already been reviewed.");
+
+    return await this.orderRepository.createReviewAndUpdateRatings(
+      orderId, customerId, order.restaurantId, order.assignedDelivererId, data
+    );
   }
 
 }

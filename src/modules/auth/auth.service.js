@@ -5,7 +5,7 @@ import { UnauthorizedError, ConflictError, BusinessLogicError, NotFoundError, Fo
 import { AUTH_ERRORS } from '../../core/errors/error.codes.js';
 import { generateAccessToken, generateRefreshToken } from '../../core/utils/token.utils.js';
 import { emailAdapter } from '../../infrastructure/email/email.adapter.js';
-import { only } from 'node:test';
+import { TelegramAdapter } from '../../infrastructure/telegram/telegram.adapter.js';
 
 const mockSendSMS = async (phone, otp) => {
   console.log(`[SMS MOCK] To: ${phone} | OTP: ${otp}`);
@@ -17,17 +17,18 @@ export class AuthService {
     this.authRepository = authRepository;
   }
 
-    async _generateAndSendPhoneOTP(user) {
+    async _generateAndSendPhoneOTP(tx, user) {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const tokenHash = crypto.createHash('sha256').update(otp).digest('hex');
-    await this.authRepository.storeVerificationToken(user.id, tokenHash, 'PHONE_VERIFICATION');
+    await this.authRepository.storeVerificationToken(tx,user.id, tokenHash, 'PHONE_VERIFICATION');
     await mockSendSMS(user.phoneNumber, otp);
   }
+  
 
-  async _generateAndSendOTP(user, type, purpose) {
+  async _generateAndSendOTP(tx,user, type, purpose) {
     const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digit OTP
     const tokenHash = crypto.createHash('sha256').update(otp).digest('hex');
-    await this.authRepository.storeVerificationToken(user.id, tokenHash, type);
+    await this.authRepository.storeVerificationToken(tx, user.id, tokenHash, type);
     await emailAdapter.sendAuthOTP(user.astuEmail, otp, purpose);
   }
 
@@ -49,7 +50,7 @@ export class AuthService {
       });
 
       await tx.customerProfile.create({ data: { userId: newUser.id } });
-      this._generateAndSendOTP(newUser, 'EMAIL_VERIFICATION', 'Account Verification').catch(console.error);
+      await this._generateAndSendOTP(tx, newUser, 'EMAIL_VERIFICATION', 'Account Verification');
       return { id: newUser.id, astuEmail: newUser.astuEmail, role: newUser.role };
     });
   }
@@ -91,7 +92,7 @@ export class AuthService {
       });
 
       // 4. Trigger SMS OTP
-      this._generateAndSendPhoneOTP(newUser).catch(console.error);
+      this._generateAndSendPhoneOTP(tx, newUser).catch(console.error);
 
       return { id: newUser.id, phoneNumber: newUser.phoneNumber, role: newUser.role };
     });
@@ -100,7 +101,7 @@ export class AuthService {
   async verifyPhone(phoneNumber, otp) {
     const user = await prisma.user.findUnique({ where: { phoneNumber } });
     if (!user) throw new NotFoundError('User not found');
-    if (user.isEmailVerified) throw new BusinessLogicError('Phone already verified'); // Reusing flag for simplicity
+    if (user.isPhoneVerified) throw new BusinessLogicError('Phone already verified'); // Reusing flag for simplicity
 
     const record = await this.authRepository.findVerificationToken(user.id, 'PHONE_VERIFICATION');
     if (!record || new Date() > record.expiresAt) {
@@ -111,7 +112,7 @@ export class AuthService {
     if (record.tokenHash !== hashedInput) throw new BusinessLogicError('Invalid OTP');
 
     await prisma.$transaction([
-      prisma.user.update({ where: { id: user.id }, data: { isEmailVerified: true } }),
+      prisma.user.update({ where: { id: user.id }, data: { isPhoneVerified: true } }),
       prisma.verificationToken.delete({ where: { id: record.id } })
     ]);
   }
@@ -142,9 +143,13 @@ export class AuthService {
       throw new BusinessLogicError(AUTH_ERRORS.USER_BANNED);
     }
 
-   if (!user.isEmailVerified && !user.isPhoneVerified) {
-      throw new ForbiddenError(AUTH_ERRORS.ACCOUNT_PENDING);
+   if (!user.isEmailVerified ) {
+      throw new ForbiddenError(AUTH_ERRORS.EMAIL_NOT_VERIFIED);
     }
+
+    if (user.role === "VENDOR_STAFF" && !user.isPhoneVerified) {
+  throw new ForbiddenError(AUTH_ERRORS.PHONE_NOT_VERIFIED);
+}
 
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken();
@@ -154,6 +159,63 @@ export class AuthService {
     return {
       accessToken,
       refreshToken, user 
+    };
+  }
+
+  async telegramLogin(initData) {
+    let telegramUser;
+    try {
+      // 1. Cryptographically verify the payload belongs to our specific Bot
+      telegramUser = TelegramAdapter.verifyInitData(initData);
+    } catch (error) {
+      throw new UnauthorizedError(`Telegram Authentication Failed: ${error.message}`);
+    }
+
+    if (!telegramUser || !telegramUser.id) {
+      throw new UnauthorizedError('Telegram user data could not be extracted.');
+    }
+
+    // 2. Find user in Database
+    let user = await prisma.user.findUnique({
+      where: { telegramId: BigInt(telegramUser.id) }
+    });
+
+    // 3. Auto-Registration (If user doesn't exist, create a skeleton CUSTOMER profile)
+    if (!user) {
+      user = await prisma.$transaction(async (tx) => {
+        const newUser = await tx.user.create({
+          data: {
+            telegramId: BigInt(telegramUser.id),
+            // Placeholder fields until they complete profile via /users/me/profile
+            fullName: `${telegramUser.first_name} ${telegramUser.last_name || ''}`.trim(),
+            phoneNumber: `UNKNOWN_${telegramUser.id}`, 
+            password: 'NO_PASSWORD_TELEGRAM_OAUTH', // Impossible to login via standard route
+            role: 'CUSTOMER',
+            activeMode: 'CUSTOMER',
+            isEmailVerified: false,
+            isPhoneVerified: false,
+          }
+        });
+
+        await tx.customerProfile.create({ data: { userId: newUser.id } });
+        return newUser;
+      });
+    }
+
+    // 4. Standard Status Checks
+    if (user.status !== 'ACTIVE') throw new BusinessLogicError(AUTH_ERRORS.USER_BANNED);
+
+    // 5. Issue Standard Tokens
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken();
+
+    await this.authRepository.storeRefreshToken(user.id, refreshToken);
+
+    return {
+      accessToken,
+      refreshToken,
+      user: { id: user.id, fullName: user.fullName, role: user.role },
+      isProfileComplete: user.phoneNumber !== `UNKNOWN_${telegramUser.id}` // Hint to frontend to prompt for details
     };
   }
 

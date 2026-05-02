@@ -132,6 +132,7 @@ model User {
   ratingsGiven       Rating[]             @relation("RatingsGiven")
   ratingsReceived    Rating[]             @relation("RatingsReceived")
   ledgerEntries      LedgerEntry[]
+  anomalyFlags  AnomalyFlag[]
   disputesRaised     Dispute[]            @relation("DisputesRaised")
   disputesAssigned   Dispute[]            @relation("DisputesAssigned")
   dispatchLogs       DispatchLog[]
@@ -323,7 +324,10 @@ model Order {
   customerId            String    @db.Uuid
   delivererId           String?   @db.Uuid
   restaurantId          String    @db.Uuid
+  pickupLat   Float?
+  pickupLng   Float?
   estimatedDeliveryTime DateTime?
+  estimatedReadyAt DateTime?
 
   // Financials
   foodPrice      Decimal @db.Decimal(10, 2)
@@ -332,6 +336,7 @@ model Order {
   serviceFee     Decimal @db.Decimal(10, 2)
   tip            Decimal @default(0.00) @db.Decimal(10, 2) // Added from PRD
   totalAmount    Decimal @db.Decimal(10, 2)
+  payoutAmount    Decimal @db.Decimal(10, 2)
 
   // State
   status        OrderStatus   @default(CREATED)
@@ -353,6 +358,7 @@ model Order {
   ratings       Rating[]
   statusHistory OrderStatusHistory[]
   ledgerEntries LedgerEntry[]
+  anomalyFlags AnomalyFlag[]
   disputes      Dispute[]
   dispatchLogs  DispatchLog[]
 
@@ -406,6 +412,20 @@ model Payment {
   createdAt         DateTime      @default(now())
 }
 
+model PayoutLog {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId      String   @db.Uuid
+  status       String   // processing, SUCCESS, FAILED
+  apiResponse  String?  @db.Text
+  attempts     Int      @default(1)
+  createdAt    DateTime @default(now())
+
+  // Note: If you want to strictly relate this to the Order model, you can add:
+  // order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // @@index([orderId])
+}
+
+
 model Rating {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   raterId   String   @db.Uuid
@@ -441,6 +461,7 @@ model LedgerEntry {
   status      LedgerEntryStatus     @default(PENDING)
   description String?               @db.Text
   reference   String?               @unique
+  transferRef String?               @unique
   createdAt   DateTime              @default(now())
 
   // Relations
@@ -488,6 +509,21 @@ model DispatchLog {
   @@index([delivererId])
 }
 
+model AnomalyFlag {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId     String?  @db.Uuid
+  userId      String   @db.Uuid
+  reason      String   // e.g., "HIGH_CANCEL_RATE", "EXCESSIVE_REFUNDS", "GPS_MISMATCH"
+  severity    String   @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  isResolved  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order       Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([isResolved])
+}
 model SystemConfig {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   key       String   @unique

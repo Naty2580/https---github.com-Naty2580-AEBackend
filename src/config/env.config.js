@@ -10,6 +10,8 @@ const envSchema = z.object({
   
   // Database
   DATABASE_URL: z.url("DATABASE_URL must be a valid connection string"),
+  FRONTEND_URL: z.string().url("FRONTEND_URL must be a valid URL").default('http://localhost:5173'),
+  TELEGRAM_BOT_TOKEN: z.string().min(20, "Valid Telegram Bot Token is required"),
   
   // Security
   JWT_ACCESS_SECRET: z.string().min(32),

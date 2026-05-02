@@ -9,7 +9,8 @@ import { queryMenuItemsSchema } from '../modules/menus/menu.dto.js';
 import { protect } from '../api/middlewares/auth.middleware.js';
 import orderRoutes from '../modules/orders/order.routes.js';
 import dispatchRoutes from '../modules/dispatch/dispatch.routes.js';
-import paymentRoutes from '../modules/payments/payment.routes.js'
+import paymentRoutes from '../modules/payments/payment.routes.js';
+import ledgerRoutes from '../modules/ledger/ledger.route.js';
 
 
 const router = express.Router();
@@ -31,6 +32,7 @@ router.use('/restaurants/:restaurantId', menuRoutes);
 router.use('/orders', orderRoutes);
 router.use('/dispatch', dispatchRoutes);
 router.use('/payments', paymentRoutes);
+router.use('/ledger', ledgerRoutes);
 
 // Global menu search endpoint (no restaurantId in path)
 router.get(

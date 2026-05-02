@@ -1,38 +1,37 @@
 import prisma from '../../infrastructure/database/prisma.client.js';
-import { BusinessLogicError, NotFoundError } from '../../core/errors/domain.errors.js';
+import { BusinessLogicError } from '../../core/errors/domain.errors.js';
 
 export class OrderWorkflowService {
   /**
    * Deliverer accepts the order.
    * Logic: Sets status to ASSIGNED, locks deliverer.
-   * 
-   * IMPORTANT: Order.delivererId is a FK to DelivererProfile.id (NOT User.id).
-   * We must resolve the DelivererProfile.id from the userId before writing.
    */
   async acceptOrder(orderId, userId) {
-    // 1. Resolve DelivererProfile.id from the authenticated User.id
-    const delivererProfile = await prisma.delivererProfile.findUnique({
-      where: { userId }
-    });
 
-    if (!delivererProfile) {
-      throw new NotFoundError('Deliverer profile not found. Your account may not be fully verified.');
-    }
+    const user = await prisma.user.findUnique({
+          where: { id: userId },
+          include: { delivererProfile: true }
+        });
+    
+         if (!user || !user.delivererProfile) {
+          throw new BusinessLogicError("Deliverer profile not found. Cannot accept order.");
+        }
+        const delivererId = user.delivererProfile.id;
 
     return await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: orderId } });
       
-      if (!order) throw new NotFoundError('Order not found.');
-      if (order.status !== 'AWAITING_ACCEPT') throw new BusinessLogicError('Order not available.');
+      if (order.status !== 'AWAITING_ACCEPT') throw new BusinessLogicError("Order not available.");
 
       const updated = await tx.order.update({
         where: { id: orderId },
         data: { 
           status: 'ASSIGNED', 
-          delivererId: delivererProfile.id  // DelivererProfile.id (correct FK)
+          delivererId: delivererId 
         }
       });
 
+      // Emit event: 'ORDER_ASSIGNED' -> triggers 5-min timer in BullMQ
       return updated;
     });
   }
@@ -55,11 +54,11 @@ export class OrderWorkflowService {
   }
 
   authorizeTransition(order, nextStatus, role, actorId) {
-    // Note: order.delivererId is a DelivererProfile.id, not a User.id.
-    // This check only works if actorId is also the DelivererProfile.id.
-    // For now, we rely on the main service's IDOR checks for full protection.
+    if (nextStatus === 'PICKED_UP' && order.assignedDelivererId !== actorId) {
+      throw new BusinessLogicError("Only the assigned deliverer can mark this.");
+    }
     if (nextStatus === 'VENDOR_READY_FOR_PICKUP' && role !== 'VENDOR_STAFF') {
-      throw new BusinessLogicError('Only the vendor can mark this status.');
+      throw new BusinessLogicError("Only the vendor can mark this status.");
     }
   }
-}
+}

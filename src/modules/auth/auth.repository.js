@@ -36,16 +36,16 @@ export class AuthRepository {
     });
   }
 
-  async storeVerificationToken(userId, tokenHash, type, expiresInMinutes = 15) {
+  async storeVerificationToken(tx,userId, tokenHash, type, expiresInMinutes = 15) {
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + expiresInMinutes);
 
     // Invalidate previous tokens of the same type for this user
-    await prisma.verificationToken.deleteMany({
+    await tx.verificationToken.deleteMany({
       where: { userId, type }
     });
 
-    return await prisma.verificationToken.create({
+    return await tx.verificationToken.create({
       data: { userId, tokenHash, type, expiresAt }
     });
   }

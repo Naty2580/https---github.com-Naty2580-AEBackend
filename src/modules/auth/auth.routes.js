@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as authController from './auth.controller.js';
 import { validate } from '../../api/middlewares/validate.middleware.js';
-import { loginSchema, registerSchema, verifyEmailSchema, resendVerificationSchema ,forgotPasswordSchema, resetPasswordSchema, registerVendorSchema, verifyPhoneSchema } from './auth.dto.js';
+import { loginSchema, registerSchema, verifyEmailSchema, resendVerificationSchema ,forgotPasswordSchema, resetPasswordSchema, registerVendorSchema, verifyPhoneSchema, telegramLoginSchema } from './auth.dto.js';
 import { authRateLimiter } from '../../api/middlewares/rate-limiter.js';
 
 const router = Router();
@@ -80,25 +80,7 @@ router.post('/register/vendor', validate(registerVendorSchema), authController.r
  *       200: { description: Login successful }
  */
 router.post('/login', validate(loginSchema), authController.login);
-
-/**
- * @openapi
- * /auth/refresh:
- *   post:
- *     summary: Refresh access token
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [refreshToken]
- *             properties:
- *               refreshToken: { type: string }
- *     responses:
- *       200: { description: Token refreshed }
- */
+router.post('/login/telegram', validate(telegramLoginSchema), authController.telegramLogin);
 router.post('/refresh', authController.refresh);
 
 /**

@@ -24,3 +24,15 @@ export const getMetrics = async (req, res, next) => {
     next(error);
   }
 };
+
+export const updateLiveLocation = async (req, res, next) => {
+  try {
+    const { lat, lng, orderId } = req.body;
+    // req.user.id is guaranteed to be the Deliverer by RBAC middleware
+    await dispatchService.updateLiveLocation(req.user.id, lat, lng, orderId);
+    
+    res.status(200).json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};

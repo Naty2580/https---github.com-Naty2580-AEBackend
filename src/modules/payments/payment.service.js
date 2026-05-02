@@ -1,129 +1,184 @@
 import prisma from '../../infrastructure/database/prisma.client.js';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { ChapaAdapter } from '../../infrastructure/payment/chapa.adapter.js';
+import config from '../../config/env.config.js';
+import crypto from 'node:crypto';
+import { NotFoundError, BusinessLogicError, ForbiddenError } from '../../core/errors/domain.errors.js';
 
 export class PaymentService {
   constructor() {
     this.ledgerService = new LedgerService();
   }
 
-   async handlePaymentSuccess(chapaRef, orderId) {
-    try {
-      await prisma.$transaction(async (tx) => {
-        // 1. Lock the order row to prevent simultaneous cancellation
-        const [order] = await tx.$queryRaw`
-          SELECT id, status, "paymentStatus", "totalAmount", "customerId" 
-          FROM "Order" 
-          WHERE id = ${orderId}::uuid 
-          FOR UPDATE;
-        `;
+  async initializePayment(userId, userEmail, userFullName, orderId) {
 
-        if (!order) {
-          console.error(`[WEBHOOK ERROR] Order ${orderId} not found.`);
-          return;
-        }
-
-        // 2. Idempotency Check (Webhook arrived twice)
-        if (order.paymentStatus === 'CAPTURED') {
-          console.log(`[WEBHOOK] Order ${orderId} already captured. Ignoring.`);
-          return; 
-        }
-
-        // 3. The Phantom Cancellation Edge Case
-        if (order.status === 'CANCELLED') {
-          console.warn(`[WEBHOOK CONFLICT] Order ${orderId} was cancelled before webhook arrived. Triggering automatic refund sequence.`);
-          
-          // Update payment status to show we received it, but keep order CANCELLED
-          await tx.order.update({
-            where: { id: orderId },
-            data: { paymentStatus: 'REFUNDED', chapaRef }
-          });
-
-          // Ledger Accounting: Money came in (Reserve), but must immediately go out (Refund)
-          await this.ledgerService.processFinancialEvent(
-            order, 'ESCROW_RESERVE', order.totalAmount, order.customerId, tx
-          );
-          await this.ledgerService.processFinancialEvent(
-            order, 'REFUND', order.totalAmount, order.customerId, tx
-          );
-          
-          return;
-        }
-
-        // 4. Normal Happy Path
-        if (order.status !== 'AWAITING_PAYMENT') {
-          // This should never happen unless a Deliverer bypassed state
-          console.error(`[WEBHOOK ERROR] Order ${orderId} is in illegal state ${order.status}.`);
-          throw new Error('ILLEGAL_STATE');
-        }
-
-        // Update status to PAYMENT_RECEIVED
-        const updated = await tx.order.update({
-          where: { id: orderId },
-          data: { status: 'PAYMENT_RECEIVED', paymentStatus: 'CAPTURED', chapaRef }
-        });
-
-        await tx.orderStatusHistory.create({
-          data: { orderId, newStatus: 'PAYMENT_RECEIVED', changedById: order.customerId }
-        });
-
-        // Trigger Escrow
-        await this.ledgerService.processFinancialEvent(
-          updated, 'ESCROW_RESERVE', updated.totalAmount, updated.customerId, tx
-        );
-      });
-    } catch (error) {
-      console.error(`🔥 [WEBHOOK FAILURE] Order ${orderId}:`, error);
-      throw error;
-    }
-  }
-
-   async initializePayment(customerId, orderId) {
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: { customer: { include: { user: true } } }
+    
+const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { customerProfile: true }
     });
 
-    if (!order) throw new NotFoundError('Order not found.');
-    if (order.customerId !== customerId) throw new ForbiddenError('Unauthorized access to this order.');
+     if (!user || !user.customerProfile) {
+      throw new BusinessLogicError("Customer profile not found. Cannot place order.");
+    }
+    const cusId = user.customerProfile.id;
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId }
+    });
+
+    if (!order) throw new NotFoundError('Order not found');
+    if (order.customerId !== cusId) throw new ForbiddenError('Unauthorized access to this order.');
     if (order.status !== 'ASSIGNED') throw new BusinessLogicError('Order is not ready for payment. Waiting for a deliverer to accept.');
     if (order.paymentStatus !== 'AWAITING_PAYMENT') throw new BusinessLogicError('Payment has already been processed or cancelled.');
 
-    // Prepare Chapa Payload
-    const payload = {
-      amount: Number(order.totalAmount).toString(),
-      currency: "ETB",
-      email: order.customer.user.email || order.customer.user.astuEmail,
-      first_name: order.customer.user.fullName,
-      last_name: "ASTU", // Placeholder if single name provided
-      phone_number: order.customer.user.phoneNumber,
-      tx_ref: `TXN-${order.shortId}-${Date.now()}`,
-      callback_url: `${config.FRONTEND_URL}/orders/${order.id}/success`, // Redirect customer here after payment
-      return_url: `${config.FRONTEND_URL}/orders/${order.id}/success`,
+    // Generate unique transaction reference
+    const txRef = `AE-TXN-${order.shortId}-${crypto.randomBytes(4).toString('hex')}`;
+
+    const chapaData = {
+      amount: Number(order.totalAmount).toString(), // RESTORED: Dynamic Pricing
+      currency: 'ETB',
+      email: userEmail,
+      first_name: userFullName,
+      last_name: "ASTU",
+      tx_ref: txRef,
+      callback_url: `${config.FRONTEND_URL}/orders/${order.id}/tracking`, 
+      return_url: `${config.FRONTEND_URL}/orders/${order.id}/tracking`,
       "customization[title]": "ASTU Eats Delivery",
       "customization[description]": `Payment for order ${order.shortId}`
     };
 
+    // Initialize with Chapa
+    const chapaResponse = await ChapaAdapter.initializeTransaction(chapaData);
+
+    // RESTORED: Must save txRef to database so Webhook can find it later
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { chapaRef: txRef }
+    });
+
+    return chapaResponse.data.checkout_url;
+  }
+
+  // RESTORED OUR PREVIOUS, BULLETPROOF OCC WEBHOOK LOGIC
+  async handlePaymentSuccess(chapaRef) {
     try {
-      // In a real production system, this calls the Chapa API.
-      // For this implementation, we simulate the API call to avoid breaking the local dev environment.
-      
-      /* Real Implementation:
-      const response = await axios.post('https://api.chapa.co/v1/transaction/initialize', payload, {
-        headers: { Authorization: `Bearer ${config.CHAPA_SECRET_KEY}` }
+      await prisma.$transaction(async (tx) => {
+        // Lock the row by chapaRef
+        const [order] = await tx.$queryRaw`
+          SELECT id, status, "paymentStatus", "totalAmount", "customerId" 
+          FROM "Order" 
+          WHERE "chapaRef" = ${chapaRef} 
+          FOR UPDATE;
+        `;
+
+        if (!order) {
+          console.warn(`[WEBHOOK WARNING] No order found for tx_ref: ${chapaRef}`);
+          return;
+        }
+
+        if (order.paymentStatus === 'CAPTURED') return; 
+
+        const profile = await tx.customerProfile.findUnique({
+          where: { id: order.customerId },
+          select: { userId: true }
+        });
+
+        if (!profile) {
+          console.error(`[WEBHOOK ERROR] No CustomerProfile found for id: ${order.customerId}`);
+          return;
+        }
+
+        const rootUserId = profile.userId;
+
+        // Phantom Cancellation Edge Case
+        if (order.status === 'CANCELLED' || order.status === 'NO_DELIVERER_FOUND') {
+
+          console.warn(`[WEBHOOK CONFLICT] Order ${order.id} was already cancelled. Triggering physical refund.`);
+
+          await tx.order.update({
+            where: { id: order.id },
+            data: { paymentStatus: 'REFUNDED' }
+          });
+          await this.ledgerService.processFinancialEvent(order, 'ESCROW_RESERVE', order.totalAmount, rootUserId, tx);
+          await this.ledgerService.processFinancialEvent(order, 'REFUND', order.totalAmount, rootUserId, tx);
+
+          ChapaAdapter.issueRefund(chapaRef, order.totalAmount).catch(e => {
+            console.error(`🔥 [CRITICAL] Physical refund failed for Order ${order.id}. Requires manual intervention.`, e);
+          });
+          
+          return;
+        }
+
+        if (order.status !== 'AWAITING_PAYMENT' && order.status !== 'ASSIGNED') {
+          throw new Error(`ILLEGAL_STATE: ${order.status}`);
+        }
+
+        const updated = await tx.order.update({
+          where: { id: order.id },
+          data: { status: 'PAYMENT_RECEIVED', paymentStatus: 'CAPTURED', chapaRef: chapaRef }
+        });
+
+        await tx.orderStatusHistory.create({
+          data: { orderId: order.id, newStatus: 'PAYMENT_RECEIVED', changedById: rootUserId }
+        });
+
+        await this.ledgerService.processFinancialEvent(
+          updated, 'ESCROW_RESERVE', updated.totalAmount, rootUserId, tx
+        );
       });
-      return response.data.data.checkout_url;
-      */
-
-      console.log(`[PAYMENT SIMULATION] Initializing Chapa checkout for ${payload.amount} ETB. Ref: ${payload.tx_ref}`);
-      
-      // Simulate Chapa returning a checkout URL
-      return `https://checkout.chapa.co/checkout/payment/${payload.tx_ref}`;
-
-    } catch (error) {
-      console.error('Chapa Initialization Error:', error.response?.data || error.message);
-      throw new Error('Failed to initialize payment gateway.');
+    } catch (error) { 
+      if (error.code !== 'P2025') throw error;
     }
   }
 
-  
+  async disimburseDelivererPayout(orderId) {
+
+    const order = await prisma.order.findUnique({
+      where: {id: orderId},
+      include: {
+        deliverer: {
+          include: { user: true }
+        }
+      }
+    })
+
+    if (!order.deliverer || !order.deliverer.payoutAccount) {
+      console.warn(`Can not payout Order ${orderId}: Deliverer missing or has not payout account`)
+      return
+    }
+
+    const payoutAmount = Number(order.foodPrice) + Number(order.deliveryFee) + Number(order.tip)
+
+    const transferRef = `AE-PAYOUT-${crypto.randomBytes(6).toString('hex')}`
+
+    const payoutData = {
+      accountName: order.deliverer.user.fullname,
+      accountNumber: order.deliverer.payoutAccount,
+      amount: payoutAmount.toString(),
+      currency: 'ETB',
+      reference: transferRef,
+      bank_code: order.deliverer.payoutProvider,
+    }
+
+    try {
+      await chapaAdapter.transferFunds(payoutData)
+
+      await prisma.$transaction(async (tx) => {
+        await this.ledgerService.processFinancialEvent(
+          order,
+          'REIMBURSEMENT_PAYMENT',
+          payoutAmount,
+          order.deliverer.userId,
+          tx
+        )
+        await tx.ledgerEntry.updateMany({
+          where: {type: 'REIMBURSEMENT_PAYMENT', orderId: orderId},
+          data: {transferRef}
+        })
+      })
+    } catch (error) {
+      console.error('Failed to disburse deliverer pay', error);
+    }
+  }
 }

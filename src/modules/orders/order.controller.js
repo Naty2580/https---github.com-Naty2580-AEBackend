@@ -66,6 +66,8 @@ export const cancelOrder = async (req, res, next) => {
 
 export const checkout = async (req, res, next) => {
   try {
+
+
     // Controller strictly passes req.user.id to ensure the order is tied to the authenticated token
     const order = await orderService.checkout(req.user.id, req.body);
     
@@ -91,8 +93,8 @@ export const listOrders = async (req, res, next) => {
 export const vendorUpdateState = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-    await orderService.updateVendorState(req.user.id, req.user.role, id, status);
+    const { status, estimatedPrepTimeMins } = req.body;
+    await orderService.updateVendorState(req.user.id, req.user.role, id, status, estimatedPrepTimeMins);
     res.status(200).json({ success: true, message: `Order updated to ${status}` });
   } catch (error) {
     next(error);
@@ -102,15 +104,15 @@ export const vendorUpdateState = async (req, res, next) => {
 export const delivererUpdateState = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-    await orderService.updateDelivererState(req.user.id, req.user.role, id, status);
+    const { status, currentLat, currentLng } = req.body;
+    await orderService.updateDelivererState(req.user.id, req.user.role, id, status, currentLat, currentLng);
     res.status(200).json({ success: true, message: `Order updated to ${status}` });
   } catch (error) {
     next(error);
   }
 };
 
-export const customerConfirmOTP = async (req, res, next) => {
+export const completeWithOTP = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { otpCode } = req.body;
@@ -120,6 +122,17 @@ export const customerConfirmOTP = async (req, res, next) => {
     next(error);
   }
 };
+
+export const reportUnfulfillable = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { reason, details } = req.body;
+    await orderService.reportUnfulfillable(req.user.id, id, reason, details);
+    res.status(200).json({ success: true, message: 'Order safely cancelled and customer refunded.' });
+  } catch (error) {
+    next(error);
+  }
+}
 
 export const dropOrder = async (req, res, next) => {
   try {
@@ -182,3 +195,23 @@ export const retryPayout = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getQuote = async (req, res, next) => {
+  try {
+    const quote = await orderService.calculateQuote(req.body);
+    res.status(200).json({ success: true, data: quote });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const submitReview = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    await orderService.submitReview(req.user.id, id, req.body);
+    res.status(201).json({ success: true, message: 'Review submitted successfully.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
