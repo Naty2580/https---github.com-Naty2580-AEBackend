@@ -23,12 +23,6 @@ router.use(protect);
  *         name: orderId
  *         required: true
  *         schema: { type: string, format: uuid }
- *    in: query
- *         name: restaurantId
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Required if roleAs is VENDOR.
  *     responses:
  *       200: { description: Order accepted successfully }  
  */
