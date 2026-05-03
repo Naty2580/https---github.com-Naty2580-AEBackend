@@ -4,8 +4,9 @@ import { restrictTo } from '../../api/middlewares/rbac.middleware.js';
 import * as orderController from './order.controller.js';
 import { validate } from '../../api/middlewares/validate.middleware.js';
 import { checkoutSchema, cancelOrderSchema, orderQuerySchema, 
-  updateVendorStateSchema, updateDelivererStateSchema, completeOrderSchema, dropOrderSchema, raiseDisputeSchema, quoteSchema, createReviewSchema , reportUnfulfillableSchema } from './orders.dto.js';
+  updateVendorStateSchema, updateDelivererStateSchema, completeOrderSchema, dropOrderSchema, raiseDisputeSchema, quoteSchema, createReviewSchema , reportUnfulfillableSchema, ubmitCustomerReviewSchema, submitDelivererReviewSchema } from './orders.dto.js';
   import { resolveDisputeSchema, retryPayoutSchema } from '../ledger/ledger.dto.js';
+  import * as disputeController from '../disputes/dispute.controller.js';
 
 const router = Router(); 
 
@@ -127,6 +128,23 @@ router.post(
 router.post('/quote', restrictTo('CUSTOMER', 'DELIVERER', 'ADMIN'), validate(quoteSchema), orderController.getQuote);
 
 // NEW: Post-Delivery Review
-router.post('/:id/review', restrictTo('CUSTOMER', 'DELIVERER', 'ADMIN'), validate(createReviewSchema), orderController.submitReview);
+// router.post('/:id/review', restrictTo('CUSTOMER', 'DELIVERER', 'ADMIN'), validate(createReviewSchema), orderController.submitReview);
+
+router.post(
+  '/:id/review', 
+  restrictTo('CUSTOMER', 'DELIVERER'), 
+  (req, res, next) => {
+    // Dynamic Validation middleware
+    const schema = req.user.role === 'DELIVERER' ? submitDelivererReviewSchema : submitCustomerReviewSchema;
+    validate(schema)(req, res, next);
+  }, 
+  orderController.submitReview
+);
+
+router.get(
+  '/disputes/all',
+  restrictTo('ADMIN'),
+  disputeController.listDisputes
+);
 
 export default router;

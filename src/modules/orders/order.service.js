@@ -14,6 +14,7 @@ import { DispatchService } from '../dispatch/dispatch.service.js';
 import { socketManager } from '../../infrastructure/websockets/socket.manager.js';
 import { PayoutService } from '../payouts/payout.service.js';
 import { fraudService } from '../fraud/fraud.service.js';
+import { notificationService } from '../notifications/notification.service.js';
 
 
 
@@ -865,8 +866,54 @@ export class OrderService {
         );
       } else {
         await this.payoutService.executeDelivererPayout(order, tx);
+        const maliciousReview = await tx.review.findUnique({ where: { orderId: order.id } });
+        if (maliciousReview && maliciousReview.delivererRating < 3) {
+           await tx.review.update({
+             where: { id: maliciousReview.id },
+             data: { delivererRating: null, comment: "[Redacted by Admin Dispute]" }
+           });
+          }
+      }
+     const resolutionMessage = resolution === 'REFUND_CUSTOMER' 
+        ? 'The dispute was resolved in your favor. A refund has been issued.' 
+        : 'The dispute was resolved in the Deliverer\'s favor. No refund will be issued.';
+        
+      await notificationService.sendNotification(
+        order.customer.userId, 'Dispute Resolved', resolutionMessage, 'DISPUTE_UPDATE'
+      );
+      
+      if (order.assignedDelivererId) {
+        const delivMessage = resolution === 'PAY_DELIVERER' 
+          ? 'The dispute was resolved in your favor. Your payout is processing.' 
+          : 'The dispute was resolved in the Customer\'s favor. You will not receive a payout for this order.';
+        await notificationService.sendNotification(
+          order.assignedDelivererId, 'Dispute Resolved', delivMessage, 'DISPUTE_UPDATE'
+        );
       }
     });
+  }
+
+   async submitReview(userId, userRole, orderId, data) {
+    const order = await this.orderRepository.findById(orderId);
+    if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
+    if (order.status !== 'COMPLETED') throw new BusinessLogicError("Can only review completed orders.");
+
+    if (userRole === 'CUSTOMER') {
+      if (order.customer.userId !== userId) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
+      return await this.orderRepository.upsertCustomerReview(
+        orderId, userId, order.restaurantId, order.assignedDelivererId, data
+      );
+    } 
+    
+    if (userRole === 'DELIVERER') {
+      if (order.assignedDelivererId !== userId) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
+      // Pass order.customer.userId to ensure the rating applies to the root user profile
+      return await this.orderRepository.upsertDelivererReview(
+        orderId, order.customer.userId, data
+      );
+    }
+
+    throw new ForbiddenError("Role not authorized to submit reviews.");
   }
 
   /**
@@ -929,20 +976,20 @@ export class OrderService {
   /**
    * NEW: Review Submission
    */
-  async submitReview(customerId, orderId, data) {
-    const order = await this.orderRepository.findById(orderId);
-    if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
+  // async submitReview(customerId, orderId, data) {
+  //   const order = await this.orderRepository.findById(orderId);
+  //   if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-    if (order.customerId !== customerId) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
-    if (order.status !== 'COMPLETED') throw new BusinessLogicError("Can only review completed orders.");
+  //   if (order.customerId !== customerId) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
+  //   if (order.status !== 'COMPLETED') throw new BusinessLogicError("Can only review completed orders.");
 
-    // Ensure they haven't already reviewed it
-    const existingReview = await prisma.review.findUnique({ where: { orderId } });
-    if (existingReview) throw new ConflictError("Order has already been reviewed.");
+  //   // Ensure they haven't already reviewed it
+  //   const existingReview = await prisma.review.findUnique({ where: { orderId } });
+  //   if (existingReview) throw new ConflictError("Order has already been reviewed.");
 
-    return await this.orderRepository.createReviewAndUpdateRatings(
-      orderId, customerId, order.restaurantId, order.assignedDelivererId, data
-    );
-  }
+  //   return await this.orderRepository.createReviewAndUpdateRatings(
+  //     orderId, customerId, order.restaurantId, order.assignedDelivererId, data
+  //   );
+  // }
 
 }

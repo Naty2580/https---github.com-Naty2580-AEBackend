@@ -1,15 +1,19 @@
 import prisma from '../../infrastructure/database/prisma.client.js';
 import { LedgerService } from '../ledger/ledger.service.js'; 
 
+import { notificationService } from '../notifications/notification.service.js'; 
+
 export class OrderTimeoutService {
     constructor() {
     this.ledgerService = new LedgerService();
+    this.notificationService = new notificationService();
   }
 
   /**
    * Schedules a 5-minute timeout for the Customer to complete the Chapa payment.
    * If unpaid, the order is cancelled, and the deliverer is freed.
    */
+
    schedulePaymentTimeout(orderId, customerId) {
     const TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -17,43 +21,52 @@ export class OrderTimeoutService {
       try {
         const order = await prisma.order.findUnique({
           where: { id: orderId },
-          select: { status: true }
+          select: { status: true, delivererId: true }
         });
 
-        if (order && order.status === 'ASSIGNED') {
+        if (order && order.status === 'ASSIGNED'){
           console.log(`⏳ [TIMEOUT] Order ${orderId} unpaid. Cancelling...`);
           
           await prisma.$transaction([
             prisma.order.update({
-              where: { id: orderId, status: 'ASSIGNED' }, // OCC check
+              where: { id: orderId, status: 'ASSIGNED'},
               data: { status: 'CANCELLED' }
             }),
             prisma.orderStatusHistory.create({
               data: { orderId, newStatus: 'CANCELLED', changedById: customerId }
             })
           ]);
+ await notificationService.sendNotification(
+            customerId, 'Order Cancelled', 'Your order was cancelled because payment was not completed within 5 minutes.', 'SYSTEM_ALERT'
+          );
+          
+          if (order.delivererId) {
+            await notificationService.sendNotification(
+              order.assignedDelivererId, 'Delivery Cancelled', 'The customer failed to pay. You are free to accept new orders.', 'SYSTEM_ALERT'
+            );
+          }
+
         }
       } catch (error) {
         if (error.code !== 'P2025') console.error(`🔥 [TIMEOUT ERROR]:`, error);
       }
-
       timer.unref();
     }, TIMEOUT_MS);
   }
 
  scheduleBroadcastTimeout(orderId, customerId) {
     const TIMEOUT_MS = 15 * 60 * 1000;
-
     setTimeout(async () => {
       try {
         const order = await prisma.order.findUnique({
           where: { id: orderId },
           select: { status: true, paymentStatus: true, totalAmount: true, customerId: true }
         });
-
         if (order && order.status === 'AWAITING_ACCEPT') {
+
           console.log(`⏳ [TIMEOUT] Order ${orderId} unaccepted. Refunding...`);
-          
+
+
           await prisma.$transaction([
             prisma.order.update({
               where: { id: orderId, status: 'AWAITING_ACCEPT' },
@@ -65,7 +78,7 @@ export class OrderTimeoutService {
           ]);
 
           // Escrow Reversal (If they somehow pre-paid, though current flow is accept -> pay)
-          if (order.paymentStatus === 'CAPTURED') {
+          if (order.paymentStatus === 'CAPTURED'){
             await this.ledgerService.processFinancialEvent(
               order, 'REFUND', order.totalAmount, order.customerId
             );

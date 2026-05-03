@@ -10,6 +10,8 @@ import {
   updateUserStatusSchema, updatePayoutSchema, deactivateAccountSchema, 
   changePasswordSchema, updateEmailSchema, updatePhoneSchema, updateVendorStatusSchema
 } from './users.dto.js';
+import { toggleBookmarkSchema, queryBookmarksSchema } from './bookmarks.dto.js';
+import { createTicketSchema, resolveTicketSchema } from './support.dto.js';
 
 const router = Router();
 
@@ -36,6 +38,25 @@ router.post(
 
 
 
+// ==========================================
+// BOOKMARKS
+// ==========================================
+router.post('/me/bookmarks', validate(toggleBookmarkSchema), userController.toggleBookmark);
+router.get('/me/bookmarks', validate(queryBookmarksSchema), userController.getBookmarks);
+
+// ==========================================
+// SUPPORT TICKETS
+// ==========================================
+router.post('/me/tickets', validate(createTicketSchema), userController.createTicket);
+router.get('/me/tickets', userController.listTickets);
+
+// ADMIN ONLY
+router.patch(
+  '/tickets/:id/resolve', 
+  restrictTo('ADMIN'), 
+  validate(resolveTicketSchema), 
+  userController.updateTicketStatus
+);
 
 
 // ==========================================

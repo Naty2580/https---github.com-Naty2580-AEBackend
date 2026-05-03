@@ -66,21 +66,71 @@ export class DispatchService {
 
       if (eligibleDeliverers.length === 0) return;
 
-      // 2. CRITICAL FIX: Prioritize by Rating (Descending)
-      // High-rated deliverers get the socket ping slightly faster, giving them first pick.
-      eligibleDeliverers.sort((a, b) => Number(b.rating) - Number(a.rating));
+     // NEW: Fetch all deliverers who have BOOKMARKED this restaurant
+      const bookmarkedUserIds = await prisma.bookmark.findMany({
+        where: { type: 'RESTAURANT', targetId: order.restaurantId },
+        select: { userId: true }
+      }).then(res => res.map(b => b.userId));
 
-      const broadcastPayload = { /* ... existing payload generation ... */ };
+      // CRITICAL FIX: The Dispatch Prioritization Algorithm
+      // 1st Priority: Have they bookmarked the restaurant? (Camping behavior)
+      // 2nd Priority: What is their rating?
+      eligibleDeliverers.sort((a, b) => {
+        const aBookmarks = bookmarkedUserIds.includes(a.userId) ? 1 : 0;
+        const bBookmarks = bookmarkedUserIds.includes(b.userId) ? 1 : 0;
+        
+        if (aBookmarks !== bBookmarks) {
+          return bBookmarks - aBookmarks; // Priority to bookmarked
+        }
+        
+        return Number(b.rating) - Number(a.rating); // Fallback to rating
+      });
+
+       const broadcastPayload = {
+        orderId: order.id,
+        shortId: order.shortId,
+        
+        // Pickup Details
+        restaurant: {
+          name: restaurant.name,
+          location: restaurant.location,
+          lat: restaurant.lat,
+          lng: restaurant.lng
+        },
+
+        // Dropoff Details (Dorm block only, no exact room or name)
+        dropoffLocation: order.customer?.defaultDormBlock || "ASTU Campus",
+        
+        // Financial Incentive (What the deliverer earns)
+        earnings: {
+          deliveryFee: Number(order.deliveryFee),
+          tip: Number(order.tip),
+          totalPayout: Number(order.deliveryFee) + Number(order.tip)
+        },
+
+        // Summary of items so they know if they need a big bag
+        itemCount: order.items ? order.items.reduce((acc, item) => acc + item.quantity, 0) : 1,
+
+        createdAt: order.createdAt
+      };
 
       // 3. Staggered Broadcast (Priority Matching)
       let delay = 0;
       eligibleDeliverers.forEach((deliverer, index) => {
         if (socketManager.connectedDeliverers.has(deliverer.userId)) {
+          const distanceToRestaurant = Math.round(
+            calculateDistance(restaurant.lat, restaurant.lng, deliverer.lat, deliverer.lng)
+          );
+
+          const personalizedPayload = {
+            ...broadcastPayload,
+            distanceToRestaurantMeters: distanceToRestaurant
+          };
           // Top 3 deliverers get it instantly. Others get it delayed by 2 seconds each.
           const currentDelay = index < 3 ? 0 : delay += 2000;
 
           setTimeout(() => {
-            socketManager.emitToDeliverer(deliverer.userId, 'ORDER_BROADCAST', broadcastPayload);
+            socketManager.emitToDeliverer(deliverer.userId, 'ORDER_BROADCAST', personalizedPayload);
             this.repository.logBroadcastOffer(order.id, deliverer.userId).catch(console.error);
           }, currentDelay);
         }

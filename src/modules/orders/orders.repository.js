@@ -480,52 +480,118 @@ items: { select: { quantity: true, unitPrice: true, product: { select: { name: t
     }
   }
 
-  async createReviewAndUpdateRatings(orderId, customerId, restaurantId, delivererId, data) {
+  // async createReviewAndUpdateRatings(orderId, customerId, restaurantId, delivererId, data) {
+  //   return await prisma.$transaction(async (tx) => {
+  //     // 1. Create the Review
+  //     const review = await tx.review.create({
+  //       data: {
+  //         orderId,
+  //         rating: data.restaurantRating, // Storing restaurant rating in core review
+  //         comment: data.comment
+  //       }
+  //     });
+
+  //     // 2. Aggregate Restaurant Rating
+  //     const restStats = await tx.review.aggregate({
+  //       where: { order: { restaurantId } },
+  //       _avg: { rating: true },
+  //       _count: { id: true }
+  //     });
+  //     await tx.restaurant.update({
+  //       where: { id: restaurantId },
+  //       data: { avgRating: restStats._avg.rating || 5.0, totalReviews: restStats._count.id }
+  //     });
+
+  //     // 3. Aggregate Deliverer Rating (If applicable)
+  //     if (delivererId && data.delivererRating) {
+  //       // We log a separate metric for deliverers (or you can expand the Review model later)
+  //       // For now, we manually adjust a moving average for simplicity, or query past orders
+  //       const delivererStats = await tx.order.aggregate({
+  //         where: { assignedDelivererId: delivererId, status: 'COMPLETED' },
+  //         _count: { id: true }
+  //       });
+        
+  //       const currentProfile = await tx.delivererProfile.findUnique({ where: { userId: delivererId } });
+  //       const currentRating = Number(currentProfile.rating);
+  //       const totalDeliveries = delivererStats._count.id || 1;
+        
+  //       // Simple moving average
+  //       const newRating = ((currentRating * (totalDeliveries - 1)) + data.delivererRating) / totalDeliveries;
+        
+  //       await tx.delivererProfile.update({
+  //         where: { userId: delivererId },
+  //         data: { rating: newRating.toFixed(2) }
+  //       });
+  //     }
+
+  //     return review;
+  //   });
+  // }
+  
+  async upsertCustomerReview(orderId, customerId, restaurantId, delivererId, data) {
     return await prisma.$transaction(async (tx) => {
-      // 1. Create the Review
-      const review = await tx.review.create({
-        data: {
+      // 1. Upsert Review Record
+      const review = await tx.review.upsert({
+        where: { orderId },
+        update: {
+          restaurantRating: data.restaurantRating,
+          delivererRating: data.delivererRating,
+          customerComment: data.comment
+        },
+        create: {
           orderId,
-          rating: data.restaurantRating, // Storing restaurant rating in core review
-          comment: data.comment
+          restaurantRating: data.restaurantRating,
+          delivererRating: data.delivererRating,
+          customerComment: data.comment
         }
       });
 
       // 2. Aggregate Restaurant Rating
       const restStats = await tx.review.aggregate({
-        where: { order: { restaurantId } },
-        _avg: { rating: true },
+        where: { order: { restaurantId }, restaurantRating: { not: null } },
+        _avg: { restaurantRating: true },
         _count: { id: true }
       });
       await tx.restaurant.update({
         where: { id: restaurantId },
-        data: { avgRating: restStats._avg.rating || 5.0, totalReviews: restStats._count.id }
+        data: { avgRating: restStats._avg.restaurantRating || 5.0, totalReviews: restStats._count.id }
       });
 
-      // 3. Aggregate Deliverer Rating (If applicable)
+      // 3. Aggregate Deliverer Rating
       if (delivererId && data.delivererRating) {
-        // We log a separate metric for deliverers (or you can expand the Review model later)
-        // For now, we manually adjust a moving average for simplicity, or query past orders
-        const delivererStats = await tx.order.aggregate({
-          where: { assignedDelivererId: delivererId, status: 'COMPLETED' },
-          _count: { id: true }
+        const delivStats = await tx.review.aggregate({
+          where: { order: { assignedDelivererId: delivererId }, delivererRating: { not: null } },
+          _avg: { delivererRating: true }
         });
-        
-        const currentProfile = await tx.delivererProfile.findUnique({ where: { userId: delivererId } });
-        const currentRating = Number(currentProfile.rating);
-        const totalDeliveries = delivererStats._count.id || 1;
-        
-        // Simple moving average
-        const newRating = ((currentRating * (totalDeliveries - 1)) + data.delivererRating) / totalDeliveries;
-        
         await tx.delivererProfile.update({
           where: { userId: delivererId },
-          data: { rating: newRating.toFixed(2) }
+          data: { rating: delivStats._avg.delivererRating?.toFixed(1) || 5.0 }
         });
       }
+      return review;
+    });
+  }
+
+  async upsertDelivererReview(orderId, customerId, data) {
+    return await prisma.$transaction(async (tx) => {
+      const review = await tx.review.upsert({
+        where: { orderId },
+        update: { customerRating: data.customerRating, delivererComment: data.comment },
+        create: { orderId, customerRating: data.customerRating, delivererComment: data.comment }
+      });
+
+      // Aggregate Customer Rating
+      const custStats = await tx.review.aggregate({
+        where: { order: { customerId }, customerRating: { not: null } },
+        _avg: { customerRating: true }
+      });
+      await tx.customerProfile.update({
+        where: { userId: customerId }, // customerId here is the root User.id in our refined architecture
+        data: { rating: custStats._avg.customerRating?.toFixed(1) || 5.0 }
+      });
 
       return review;
     });
   }
-  
+
 }

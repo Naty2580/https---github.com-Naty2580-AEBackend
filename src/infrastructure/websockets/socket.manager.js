@@ -97,6 +97,17 @@ class SocketManager {
       this.io.to(socketId).emit(eventName, payload);
     }
   }
+
+ emitToUser(userId, eventName, payload) {
+    // Check customers
+    let socketId = this.connectedCustomers.get(userId);
+    // Fallback to deliverers if not found
+    if (!socketId) socketId = this.connectedDeliverers.get(userId);
+
+    if (socketId && this.io) {
+      this.io.to(socketId).emit(eventName, payload);
+    }
+  }
 }
 
 // Export singleton instance

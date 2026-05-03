@@ -131,7 +131,9 @@ model User {
   performedAudits    UserAuditLog[]       @relation("UserAuditor")
   ratingsGiven       Rating[]             @relation("RatingsGiven")
   ratingsReceived    Rating[]             @relation("RatingsReceived")
+  bookmarks    Bookmark[]
   ledgerEntries      LedgerEntry[]
+  supportTickets SupportTicket[]
   anomalyFlags  AnomalyFlag[]
   disputesRaised     Dispute[]            @relation("DisputesRaised")
   disputesAssigned   Dispute[]            @relation("DisputesAssigned")
@@ -203,6 +205,19 @@ model CustomerProfile {
   @@index([defaultLocation])
   @@index([rating])
   @@index([totalOrders])
+}
+
+model Bookmark {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String      @db.Uuid // Root User ID
+  type         String      // "RESTAURANT" or "MENU_ITEM"
+  targetId     String      @db.Uuid // ID of Restaurant or MenuItem
+  createdAt    DateTime    @default(now())
+
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, targetId]) // A user can only bookmark a specific target once
+  @@index([userId, type])
 }
 
 model DelivererProfile {
@@ -356,6 +371,7 @@ model Order {
   items         OrderItem[]
   payments      Payment[]
   ratings       Rating[]
+  review        Review?
   statusHistory OrderStatusHistory[]
   ledgerEntries LedgerEntry[]
   anomalyFlags AnomalyFlag[]
@@ -438,18 +454,21 @@ model Rating {
   comment   String?  @db.Text
   createdAt DateTime @default(now())
 }
+model Review {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId         String   @unique @db.Uuid
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  // Customer's review of the transaction
+  restaurantRating Int?
+  delivererRating  Int?
+  customerComment  String?  @db.Text
 
-model Notification {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String   @db.Uuid
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String
-  message   String   @db.Text
-  sentAt    DateTime @default(now())
-  delivered Boolean  @default(false)
-  createdAt DateTime @default(now())
+  // Deliverer's review of the customer
+  customerRating   Int?
+  delivererComment String?  @db.Text
 
-  @@index([userId])
+  createdAt       DateTime @default(now())
 }
 
 model LedgerEntry {
@@ -532,15 +551,35 @@ model SystemConfig {
   updatedAt DateTime @updatedAt
 }
 
-// model AdminAction {
-//   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-//   adminId   String   @db.Uuid
-//   user      User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
-//   orderId   String   @db.Uuid
-//   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-//   action    AdminActionType
-//   createdAt DateTime @default(now())
+  
+model Notification {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String   @db.Text
+  sentAt    DateTime @default(now())
+  type        String   // e.g., "ORDER_UPDATE", "SYSTEM_ALERT", "PROMO"
+  isRead      Boolean  @default(false)
+  delivered Boolean  @default(false)
+  createdAt DateTime @default(now())
 
-//   @@index([orderId])
-//   @@index([adminId])
-//   }
+  @@index([userId])
+}
+
+model SupportTicket {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @db.Uuid
+  subject     String
+  description String   @db.Text
+  status      String   @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  resolution  String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+

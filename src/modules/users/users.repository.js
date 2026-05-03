@@ -352,4 +352,62 @@ export class UserRepository {
       select: { id: true, astuEmail: true, isEmailVerified: true, phoneNumber: true, isPhoneVerified: true }
     });
   }
+
+   async toggleBookmark(userId, type, targetId) {
+    const existing = await prisma.bookmark.findUnique({
+      where: {
+        userId_type_targetId: { userId, type, targetId }
+      }
+    });
+
+    if (existing) {
+      await prisma.bookmark.delete({ where: { id: existing.id } });
+      return { action: 'REMOVED' };
+    } else {
+      await prisma.bookmark.create({
+        data: { userId, type, targetId }
+      });
+      return { action: 'ADDED' };
+    }
+  }
+
+  async fetchBookmarks(userId, type) {
+    return await prisma.bookmark.findMany({
+      where: {
+        userId,
+        ...(type && { type })
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  // ==========================================
+  // SUPPORT TICKETS
+  // ==========================================
+  async createTicket(userId, data) {
+    return await prisma.supportTicket.create({
+      data: { userId, subject: data.subject, description: data.description }
+    });
+  }
+
+  async updateTicket(ticketId, data) {
+    return await prisma.supportTicket.update({
+      where: { id: ticketId },
+      data
+    });
+  }
+
+  async fetchTickets(userId, isAdmin, skip, take) {
+    const where = isAdmin ? {} : { userId };
+    
+    const [total, tickets] = await prisma.$transaction([
+      prisma.supportTicket.count({ where }),
+      prisma.supportTicket.findMany({
+        where, skip, take, orderBy: { createdAt: 'desc' },
+        include: isAdmin ? { user: { select: { fullName: true, role: true } } } : undefined
+      })
+    ]);
+    return { total, tickets };
+  }
+  
 }

@@ -72,7 +72,22 @@ export const updateDelivererStateSchema = z.object({
   })
   });
   
+export const submitCustomerReviewSchema = z.object({
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({
+    restaurantRating: z.number().int().min(1).max(5),
+    delivererRating: z.number().int().min(1).max(5).optional(),
+    comment: z.string().trim().max(500).optional()
+  })
+});
 
+export const submitDelivererReviewSchema = z.object({
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({
+    customerRating: z.number().int().min(1).max(5),
+    comment: z.string().trim().max(500).optional()
+  })
+});
 
 export const completeOrderSchema = z.object({
   params: z.object({ id: z.string().uuid() }),

@@ -1,11 +1,13 @@
 import bcrypt from 'bcryptjs';
 import prisma from '../../infrastructure/database/prisma.client.js';
 import { NotFoundError, BusinessLogicError, ConflictError } from '../../core/errors/domain.errors.js';
+import { notificationService } from '../notifications/notification.service.js';
 import { USER_ERRORS } from '../../core/errors/error.codes.js';
 
 export class UserService {
   constructor(userRepository) {
     this.userRepository = userRepository;
+    this.notificationService = new notificationService();
   }
 
   async _ensureNoActiveOrders(userId) {
@@ -139,6 +141,12 @@ export class UserService {
       newValue: status,
       reason
     });
+    const title = status === 'APPROVED' ? 'Application Approved!' : 'Application Rejected';
+    const message = status === 'APPROVED' 
+      ? 'You are now an authorized Deliverer. Switch your mode to start earning.' 
+      : `Your application was rejected. Reason: ${reason || 'Not provided.'}`;
+
+    await notificationService.sendNotification(targetUserId, title, message, 'ACCOUNT_UPDATE');
 
   }
   async reviewVendorApplication(adminId, targetUserId, status, reason) {
@@ -225,6 +233,14 @@ export class UserService {
     }
 
     await this.userRepository.assignVendorStaff(targetUserId, restaurantId, isOwner);
+
+    await notificationService.sendNotification(
+      targetUserId, 
+      'Vendor Access Granted', 
+      'An admin has assigned you to a restaurant. You can now access the Vendor Dashboard.', 
+      'ACCOUNT_UPDATE'
+    );
+  
   }
 
   async setAvailability(userId, isAvailable) {
@@ -314,6 +330,32 @@ export class UserService {
 //test only
   async getAllUsers() {
     return await this.userRepository.findAll();
+  }
+
+   async toggleBookmark(userId, data) {
+    // Optionally: Verify targetId exists before bookmarking
+    return await this.userRepository.toggleBookmark(userId, data.type, data.targetId);
+  }
+
+  async getBookmarks(userId, type) {
+    const bookmarks = await this.userRepository.fetchBookmarks(userId, type);
+    // Note: A full implementation would fetch the nested Restaurant/MenuItem details here.
+    return bookmarks;
+  }
+
+  async createSupportTicket(userId, data) {
+    return await this.userRepository.createTicket(userId, data);
+  }
+
+  async listSupportTickets(userId, userRole, page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const isAdmin = userRole === 'ADMIN';
+    return await this.userRepository.fetchTickets(userId, isAdmin, skip, limit);
+  }
+
+  async resolveSupportTicket(adminId, ticketId, data) {
+    // Only Admin hits this method (enforced by RBAC)
+    return await this.userRepository.updateTicket(ticketId, data);
   }
   
 }

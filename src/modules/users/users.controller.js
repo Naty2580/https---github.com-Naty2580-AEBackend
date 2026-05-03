@@ -203,3 +203,50 @@ export const fetchAllUsers = async (req, res, next) => {
     next(error);
   }
 };
+
+export const toggleBookmark = async (req, res, next) => {
+  try {
+    const result = await userService.toggleBookmark(req.user.id, req.body);
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getBookmarks = async (req, res, next) => {
+  try {
+    const result = await userService.getBookmarks(req.user.id, req.query.type);
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createTicket = async (req, res, next) => {
+  try {
+    const ticket = await userService.createSupportTicket(req.user.id, req.body);
+    res.status(201).json({ success: true, data: ticket });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const listTickets = async (req, res, next) => {
+  try {
+    const { page, limit } = req.query;
+    const result = await userService.listSupportTickets(req.user.id, req.user.role, page, limit);
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateTicketStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const ticket = await userService.resolveSupportTicket(req.user.id, id, req.body);
+    res.status(200).json({ success: true, data: ticket });
+  } catch (error) {
+    next(error);
+  }
+};

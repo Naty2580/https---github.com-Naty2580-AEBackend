@@ -123,6 +123,16 @@ export const completeWithOTP = async (req, res, next) => {
   }
 };
 
+export const submitReview = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    await orderService.submitReview(req.user.id, req.user.role, id, req.body);
+    res.status(201).json({ success: true, message: 'Review submitted successfully.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const reportUnfulfillable = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -205,13 +215,5 @@ export const getQuote = async (req, res, next) => {
   }
 };
 
-export const submitReview = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    await orderService.submitReview(req.user.id, id, req.body);
-    res.status(201).json({ success: true, message: 'Review submitted successfully.' });
-  } catch (error) {
-    next(error);
-  }
-};
+
 

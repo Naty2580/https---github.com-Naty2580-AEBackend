@@ -11,6 +11,8 @@ import orderRoutes from '../modules/orders/order.routes.js';
 import dispatchRoutes from '../modules/dispatch/dispatch.routes.js';
 import paymentRoutes from '../modules/payments/payment.routes.js';
 import ledgerRoutes from '../modules/ledger/ledger.route.js';
+import notificationRoutes from '../modules/notification/notification.routes.js';
+import fraudRoutes from '../modules/fraud/fraud.routes.js';
 
 
 const router = express.Router();
@@ -33,6 +35,9 @@ router.use('/orders', orderRoutes);
 router.use('/dispatch', dispatchRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/ledger', ledgerRoutes);
+router.use('/fraud', fraudRoutes);
+
+router.use('/notifications', notificationRoutes); 
 
 // Global menu search endpoint (no restaurantId in path)
 router.get(
