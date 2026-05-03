@@ -10,6 +10,22 @@ const router = Router();
 router.use(protect);
 
 // Deliverer accepts the broadcasted order
+/**
+ * @openapi
+ * /dispatch/{orderId}/accept:
+ *   post:
+ *     summary: Deliverer accepts an order
+ *     tags: [Dispatch]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200: { description: Order accepted successfully }  
+ */
 router.post(
   '/:orderId/accept', 
   restrictTo('DELIVERER'), 

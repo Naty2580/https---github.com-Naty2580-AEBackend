@@ -5,6 +5,8 @@ import morgan from 'morgan';
 import swaggerUi from 'swagger-ui-express'
 import { swaggerSpec } from '../config/swagger.config.js';
 import cookieParser from 'cookie-parser';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerDocs } from '../config/swagger.config.js';
 import { timeoutService } from "../modules/orders/timeout.service.js"
 import v1Routes from './routes.v1.js';
 import { globalErrorHandler } from './middlewares/error.middleware.js';
@@ -25,6 +27,7 @@ const allowedOrigins = [
   'http://localhost:3000', // React/Next.js default
   'http://localhost:5173', // Vite default
   'http://127.0.0.1:5173', // Vite alternate
+  'http://127.0.0.1:5174', // Vite alternate
   process.env.FRONTEND_URL  // Production URL
 ].filter(Boolean); // Remove undefined values
 
