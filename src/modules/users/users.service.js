@@ -1,13 +1,12 @@
 import bcrypt from 'bcryptjs';
 import prisma from '../../infrastructure/database/prisma.client.js';
 import { NotFoundError, BusinessLogicError, ConflictError } from '../../core/errors/domain.errors.js';
-import { notificationService } from '../notifications/notification.service.js';
+import { notificationService } from '../notification/notification.service.js';
 import { USER_ERRORS } from '../../core/errors/error.codes.js';
 
 export class UserService {
   constructor(userRepository) {
     this.userRepository = userRepository;
-    this.notificationService = new notificationService();
   }
 
   async _ensureNoActiveOrders(userId) {

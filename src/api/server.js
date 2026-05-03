@@ -2,11 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import swaggerUi from 'swagger-ui-express'
-import { swaggerSpec } from '../config/swagger.config.js';
 import cookieParser from 'cookie-parser';
 import swaggerUi from 'swagger-ui-express';
-import { swaggerDocs } from '../config/swagger.config.js';
+import { swaggerSpec } from '../config/swagger.config.js';
 import { timeoutService } from "../modules/orders/timeout.service.js"
 import v1Routes from './routes.v1.js';
 import { globalErrorHandler } from './middlewares/error.middleware.js';

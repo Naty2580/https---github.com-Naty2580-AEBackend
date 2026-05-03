@@ -4,9 +4,9 @@ import { restrictTo } from '../../api/middlewares/rbac.middleware.js';
 import * as orderController from './order.controller.js';
 import { validate } from '../../api/middlewares/validate.middleware.js';
 import { checkoutSchema, cancelOrderSchema, orderQuerySchema, 
-  updateVendorStateSchema, updateDelivererStateSchema, completeOrderSchema, dropOrderSchema, raiseDisputeSchema, quoteSchema, createReviewSchema , reportUnfulfillableSchema, ubmitCustomerReviewSchema, submitDelivererReviewSchema } from './orders.dto.js';
+  updateVendorStateSchema, updateDelivererStateSchema, completeOrderSchema, dropOrderSchema, raiseDisputeSchema, quoteSchema, createReviewSchema , reportUnfulfillableSchema, submitCustomerReviewSchema, submitDelivererReviewSchema } from './orders.dto.js';
   import { resolveDisputeSchema, retryPayoutSchema } from '../ledger/ledger.dto.js';
-  import * as disputeController from '../disputes/dispute.controller.js';
+  import * as disputeController from '../dispute/dispute.controller.js';
 
 const router = Router(); 
 

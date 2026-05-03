@@ -14,7 +14,7 @@ import { DispatchService } from '../dispatch/dispatch.service.js';
 import { socketManager } from '../../infrastructure/websockets/socket.manager.js';
 import { PayoutService } from '../payouts/payout.service.js';
 import { fraudService } from '../fraud/fraud.service.js';
-import { notificationService } from '../notifications/notification.service.js';
+import { notificationService } from '../notification/notification.service.js';
 
 
 

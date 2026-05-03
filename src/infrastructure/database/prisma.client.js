@@ -11,10 +11,6 @@ import { PrismaPg } from "@prisma/adapter-pg";
 const connectionString = `${config.DATABASE_URL}`;
 
 
-// if (config.NODE_ENV !== 'production') {
-//   global.prisma = prisma;
-// }
-
  const adapter = new PrismaPg({ connectionString });
  const prisma =  new PrismaClient({ adapter });
 

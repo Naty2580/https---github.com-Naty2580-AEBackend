@@ -1,12 +1,10 @@
 import prisma from '../../infrastructure/database/prisma.client.js';
 import { LedgerService } from '../ledger/ledger.service.js'; 
-
-import { notificationService } from '../notifications/notification.service.js'; 
+import { notificationService } from '../notification/notification.service.js'; 
 
 export class OrderTimeoutService {
     constructor() {
     this.ledgerService = new LedgerService();
-    this.notificationService = new notificationService();
   }
 
   /**
