@@ -43,7 +43,7 @@ class SocketManager {
         // Attach verified data to the persistent socket session
         socket.userId = decoded.id;
         socket.role = user.role;
-        socket.activeMode = user.activeMode;
+        socket.activeMode = socket.handshake.query?.mode || user.activeMode;
         next();
       } catch (error) {
         return next(new Error('UNAUTHORIZED: Invalid token'));
@@ -55,7 +55,7 @@ class SocketManager {
       console.log(`🟢 [WS CONNECTED] User: ${socket.userId} | Mode: ${socket.activeMode}`);
 
       // Track active deliverers for targeted broadcasts
-      if (socket.activeMode === 'DELIVERER') {
+       if (socket.activeMode === 'DELIVERER' || socket.role === 'DELIVERER') {
         this.connectedDeliverers.set(socket.userId, socket.id);
         // Join a general 'deliverers' room for system-wide alerts
         socket.join('active_deliverers');
@@ -74,11 +74,8 @@ class SocketManager {
       // Cleanup on disconnect
       socket.on('disconnect', () => {
         console.log(`🔴 [WS DISCONNECTED] User: ${socket.userId}`);
-        if (socket.activeMode === 'DELIVERER') {
-          this.connectedDeliverers.delete(socket.userId);
-        } else {
-          this.connectedCustomers.delete(socket.userId);
-        }
+       this.connectedDeliverers.delete(socket.userId);
+        this.connectedCustomers.delete(socket.userId);
       });
     });
   }

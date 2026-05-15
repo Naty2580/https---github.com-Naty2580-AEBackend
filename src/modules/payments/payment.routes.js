@@ -21,4 +21,6 @@ router.post(
 // ==========================================
 router.post('/webhook/chapa', paymentController.chapaWebhook);
 
+router.post('/dev/simulate-webhook', protect, paymentController.simulateWebhookDev);
+
 export default router;

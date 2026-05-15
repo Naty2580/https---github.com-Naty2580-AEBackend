@@ -17,7 +17,7 @@ export class PayoutService {
       return;
     }
 
-    // 2. Fetch Deliverer Payout Details
+    // 2. Fetch Deliverer Payout Details 
     // Depending on the query depth from the OrderService, we might need to fetch the profile
     const deliverer = await txClient.delivererProfile.findUnique({
       where: { id: order.delivererId },
@@ -75,16 +75,24 @@ export class PayoutService {
       const payoutResult = {
         "message": "Transfer Queued Successfully",
         "status": "success",
-        "data": "3241342142sfdd"
+        "data": `bb${crypto.randomBytes(8).toString('hex')}`
       }
 
       // Record Success and Ledger
       await this.payoutRepository.logAttempt(order.id, 'SUCCESS', JSON.stringify(payoutResult));
       await this.ledgerService.processFinancialEvent(
-        order, 'REIMBURSEMENT_PAYMENT', order.payoutAmount = 120, order.delivererId, txClient
+        order, 'REIMBURSEMENT_PAYMENT', order.payoutAmount = 120, order.delivererId, txClient, transferRef
         // order, 'REIMBURSEMENT_PAYMENT', order.payoutAmount, order.delivererId, txClient
       ); 
 
+      if (Number(order.serviceFee) > 0) { 
+        const revRef = `AE-REV-${crypto.randomUUID()}`;
+        await this.ledgerService.processFinancialEvent(
+          order, 'PLATFORM_REVENUE', order.serviceFee, null, txClient,revRefl //erId means it belongs to the System, 
+        );
+      }
+
+      
     } catch (error) {
       // 6. Record Failure
       await this.payoutRepository.logAttempt(order.id, 'FAILED', error.message);
@@ -93,6 +101,7 @@ export class PayoutService {
       // Note: We do NOT throw the error here. If the payout fails, we still want the order
       // to transition to COMPLETED so the customer's UI finishes. The Admin will use the 
       // Retry endpoint to fix the broken payout later.
+      
     }
   }
 }

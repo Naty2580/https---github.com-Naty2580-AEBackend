@@ -3,6 +3,8 @@ import { calculateDistance } from '../../core/utils/pricing.utils.js';
 import { timeoutService } from '../orders/timeout.service.js';
 import { CAMPUS_CONFIG } from '../../config/fee.config.js';
 import { socketManager } from '../../infrastructure/websockets/socket.manager.js';
+import prisma from '../../infrastructure/database/prisma.client.js';
+
 
 
 export class DispatchService {
@@ -10,9 +12,9 @@ export class DispatchService {
     this.repository = new DispatchRepository();
   }
 
-  async acceptOrder(orderId, delivererId) {
+  async acceptOrder(orderId, UserId) {
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: UserId },
       select: { delivererProfile: { select: { id: true } } }
     });
 
@@ -21,10 +23,10 @@ export class DispatchService {
     }
 
     // 1. Atomic DB assignment
-    const order = await this.repository.atomicAssignOrder(orderId, userId, user.delivererProfile.id);
+    const order = await this.repository.atomicAssignOrder(orderId, UserId, user.delivererProfile.id);
     
     // 2. Start the 5-minute payment countdown
-    timeoutService.schedulePaymentTimeout(orderId,userId); // Pass customerId for tracking
+    timeoutService.schedulePaymentTimeout(orderId,UserId); // Pass customerId for tracking
     
     // 3. REAL-TIME PUSH: Tell the customer a deliverer was found!
     socketManager.emitOrderUpdate(orderId, 'ORDER_STATUS_UPDATE', {
@@ -33,6 +35,13 @@ export class DispatchService {
       message: 'A deliverer has accepted your order. Please complete your payment.',
       timestamp: new Date()
     });
+
+     if (socketManager.io) {
+      socketManager.io.to('active_deliverers').emit('ORDER_STATUS_UPDATE', {
+        orderId,
+        status: 'ASSIGNED', // The frontend socket listener will see this isn't AWAITING_ACCEPT and remove it
+      });
+    }
 
     return order;
   }
@@ -57,12 +66,15 @@ export class DispatchService {
       const restaurant = order.restaurant;
       const potentialDeliverers = await this.repository.findNearbyDeliverers(restaurant.lat, restaurant.lng);
 
-      // 1. Distance Filter (<= 1.8km)
-      let eligibleDeliverers = potentialDeliverers.filter(d => {
-        if (!d.lat || !d.lng) return false;
-        const distance = calculateDistance(restaurant.lat, restaurant.lng, d.lat, d.lng);
-        return distance <= CAMPUS_CONFIG.MAX_RADIUS_METERS;
-      });
+      // // 1. Distance Filter (<= 1.8km)
+      // let eligibleDeliverers = potentialDeliverers.filter(d => {
+      //   if (!d.lat || !d.lng) return false;
+      //   const distance = calculateDistance(restaurant.lat, restaurant.lng, d.lat, d.lng);
+      //   return distance <= CAMPUS_CONFIG.MAX_RADIUS_METERS;
+      // });
+      
+      //for testing version, we will skip the distance filter and broadcast to all deliverers
+      let eligibleDeliverers = potentialDeliverers;
 
       if (eligibleDeliverers.length === 0) return;
 
@@ -119,7 +131,7 @@ export class DispatchService {
       eligibleDeliverers.forEach((deliverer, index) => {
         if (socketManager.connectedDeliverers.has(deliverer.userId)) {
           const distanceToRestaurant = Math.round(
-            calculateDistance(restaurant.lat, restaurant.lng, deliverer.lat, deliverer.lng)
+            calculateDistance(restaurant.lat, restaurant.lng, deliverer.lat || 0, deliverer.lng || 0)
           );
 
           const personalizedPayload = {
@@ -141,7 +153,7 @@ export class DispatchService {
     }
   }
 
-   async getDelivererMetrics(userId, targetDelivererId, userRole) {
+   async getDelivererMetrics(userId, targetdelivererId, userRole) {
     if (userRole === 'DELIVERER' && userId !== targetDelivererId) {
       throw new ForbiddenError("You can only view your own metrics.");
     }

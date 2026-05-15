@@ -168,6 +168,7 @@ export const raiseDispute = async (req, res, next) => {
 
 export const getActiveDelivery = async (req, res, next) => {
   try {
+
     const delivery = await orderService.getActiveDelivery(req.user.id, req.user.role);
     res.status(200).json({ success: true, data: delivery });
   } catch (error) {

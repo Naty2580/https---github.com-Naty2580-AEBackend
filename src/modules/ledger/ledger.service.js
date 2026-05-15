@@ -1,5 +1,6 @@
 import { LedgerRepository } from './ledger.repository.js';
 import prisma from '../../infrastructure/database/prisma.client.js';
+import crypto from 'node:crypto';
 
 export class LedgerService {
   constructor() {
@@ -10,17 +11,25 @@ export class LedgerService {
    * Records financial movements within an existing Prisma transaction.
    * This is called by the OrderService during state transitions.
    */
-  async processFinancialEvent(order, type, amount, userId, tx) {
+  async processFinancialEvent(order, type, amount, profileId,txClient = prisma, uniqueRef) {
     // Audit rule: All financial movement must link to a valid order and amount
     if (amount <= 0) throw new Error("Ledger entries must have a positive amount.");
+
+    const referenceString = uniqueRef || `AE-LEDG-${crypto.randomUUID()}`;
+
+    const userId = await prisma.delivererProfile.findUnique({
+      where: { id: profileId },
+      select: { userId: true }
+    }).then(profile => profile?.userId);
+
 
     return await this.repository.createEntry({
       orderId: order.id,
       userId: userId,
       amount: amount,
       type: type,
-      reference: order.chapaRef || order.payoutRef
-    }, tx);
+      reference: referenceString
+    }, txClient);
   }
 
   async getUserLedger(userId, query) {
