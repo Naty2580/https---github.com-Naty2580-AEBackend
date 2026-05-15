@@ -8,6 +8,7 @@ import config from './config/env.config.js';
 import prisma from './infrastructure/database/prisma.client.js';
 import { timeoutService } from './modules/orders/timeout.service.js';
 import { socketManager } from './infrastructure/websockets/socket.manager.js';
+import { threadName } from 'node:worker_threads';
 
 // Create native HTTP server wrapping the Express app
 const server = createServer(app);
@@ -73,3 +74,6 @@ process.on('unhandledRejection', (reason) => {
   console.error('🔥 Unhandled Rejection! Shutting down...', reason);
   shutdown('unhandledRejection');
 }); 
+
+
+

@@ -95,7 +95,9 @@ export class OrderRepository {
   }
 
   // userId = the User.id of the customer (needed for statusHistory FK)
-  async createOrderWithItems(orderData, itemsData, userId) {
+  async createOrderWithItems(orderData, itemsData) {
+
+    console.log("here is teh data", orderData);
     return await prisma.$transaction(async (tx) => {
       // 1. Create the Order
 
@@ -110,7 +112,7 @@ export class OrderRepository {
           transactionFee: 0.00, // Determined later by payment gateway
           tip: orderData.tip,
           totalAmount: orderData.totalAmount, 
-          // payoutAmount: orderData.payoutAmount,
+          payoutAmount: orderData.payoutAmount,
           status: 'AWAITING_ACCEPT',
           paymentStatus: 'AWAITING_PAYMENT',
           otpCode: orderData.otpCode,
@@ -204,14 +206,28 @@ export class OrderRepository {
     // NOTE: Order.customerId holds a CustomerProfile.id (NOT a User.id).
     //       Order.delivererId holds a DelivererProfile.id (NOT a User.id).
     //       We must traverse the relation to filter by the User.id from the JWT.
-    if (roleAs === 'CUSTOMER') {
-      where.customer = { userId: userId };
-    } else if (roleAs === 'DELIVERER') {
-      where.deliverer = { userId: userId };
-    } else if (roleAs === 'VENDOR') {
-      if (!restaurantId) throw new Error("restaurantId is required for Vendor views");
-      where.restaurantId = restaurantId;
-    }
+    const prismaRoleMap = {
+      'CUSTOMER': 'customer',
+      'DELIVERER': 'deliverer',
+      'VENDOR': 'restaurantId' // Special case since it's a direct FK, not a relation
+    };
+    const customerUserId = await prisma.customerProfile.findUnique({
+      where: { userId },
+      select: { id: true }
+    });
+    const delivererProfileId = await prisma.delivererProfile.findUnique({
+      where: { userId },
+      select: { id: true }
+    });
+
+    // if (roleAs === 'CUSTOMER') {
+    //   where.customer = { userId: customerUserId.id };
+    // } else if (roleAs === 'DELIVERER') {
+    //   where.deliverer = { userId: delivererProfileId.id };
+    // } else if (roleAs === 'VENDOR') {
+    //   if (!restaurantId) throw new Error("restaurantId is required for Vendor views");
+    //   where.restaurantId = restaurantId;
+    // }
     // ADMIN sees all, no boundary applied
 
     const [total, orders] = await prisma.$transaction([
@@ -274,7 +290,7 @@ export class OrderRepository {
           where: { id: orderId, status: currentStatus },
           data: {
             status: 'AWAITING_ACCEPT',
-            assignedDelivererId: null
+            delivererId: null
           }
         }),
         prisma.orderStatusHistory.create({
@@ -364,8 +380,12 @@ export class OrderRepository {
           data: { status: 'COMPLETED' }
         });
 
-        await tx.orderStatusHistory.create({
-          data: { orderId, newStatus: 'COMPLETED', changedById: actorId }
+        await tx.orderStatusHistory.createMany({
+          data: [
+            { orderId, newStatus: 'DELIVERED', changedById: userId },
+            { orderId, newStatus: 'RECEIVED', changedById: userId },
+            { orderId, newStatus: 'COMPLETED', changedById: userId }
+          ]
         });
 
         // REFINED: Delegate to the robust Payout Engine
@@ -386,9 +406,19 @@ export class OrderRepository {
       'PICKED_UP', 'EN_ROUTE', 'ARRIVED', 'RECEIVED'
     ];
 
+    const delivererProfile = await prisma.delivererProfile.findUnique({
+      where: { id: delivererId },
+      select: { id: true }
+    });
+
+
+    if (!delivererProfile) {
+      throw new Error("Deliverer profile not found.");
+    }
+
     return await prisma.order.findFirst({
       where: {
-        assignedDelivererId: delivererId,
+        delivererId: delivererProfile.id,
         status: { in: activeStates }
       },
       include: {
@@ -423,7 +453,7 @@ items: { select: { quantity: true, unitPrice: true, product: { select: { name: t
     });
   }
   
-  async executeCryptographicHandshake(orderId, expectedStatus,userId, delivererId, payoutService) {
+  async executeCryptographicHandshake(orderId, expectedStatus,delivererUserId,delivererId, customerUserId, payoutService) {
     try {
       return await prisma.$transaction(async (tx) => {
         const [order] = await tx.$queryRaw`
@@ -436,21 +466,26 @@ items: { select: { quantity: true, unitPrice: true, product: { select: { name: t
         if (!order) throw new Error('NOT_FOUND');
         if (order.status !== expectedStatus) throw new Error('STATE_CONFLICT');
 
+        console.log("order in handshake before update:", order);
+
         const updatedOrder = await tx.order.update({
           where: { id: orderId },
           data: { status: 'COMPLETED' }
         });
 
         // Record both logical steps for the audit trail
-        await tx.orderStatusHistory.createMany({
+         await tx.orderStatusHistory.createMany({
           data: [
-            { orderId, newStatus: 'DELIVERED', changedById: userId },
-            { orderId, newStatus: 'RECEIVED', changedById: userId },
-            { orderId, newStatus: 'COMPLETED', changedById: userId }
+            { orderId, newStatus: 'RECEIVED', changedById: customerUserId },
+            { orderId, newStatus: 'DELIVERED', changedById: delivererUserId },
+            { orderId, newStatus: 'COMPLETED', changedById: delivererUserId }
           ]
-        });
+        });;
 
+        console.log("order in handshake after update:", updatedOrder);
         await payoutService.executeDelivererPayout(updatedOrder, tx);
+        
+        console.log("Payout executed successfully for order:", updatedOrder.id);
 
         return updatedOrder;
       });
@@ -563,7 +598,7 @@ items: { select: { quantity: true, unitPrice: true, product: { select: { name: t
       // 3. Aggregate Deliverer Rating
       if (delivererId && data.delivererRating) {
         const delivStats = await tx.review.aggregate({
-          where: { order: { assignedDelivererId: delivererId }, delivererRating: { not: null } },
+          where: { order: { delivererId: delivererId }, delivererRating: { not: null } },
           _avg: { delivererRating: true }
         });
         await tx.delivererProfile.update({

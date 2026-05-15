@@ -41,7 +41,7 @@ export const orderQuerySchema = z.object({
       'RECEIVED', 'DELIVERED', 'COMPLETED', 'DISPUTED', 'CANCELLED', 
       'NO_DELIVERER_FOUND'
     ]).optional(),
-    roleAs: z.enum(['CUSTOMER', 'DELIVERER', 'VENDOR', 'ADMIN']).default('CUSTOMER'),
+    roleAs: z.enum(['CUSTOMER', 'DELIVERER', 'VENDOR', 'ADMIN']).default('ADMIN'),
     restaurantId: z.string().uuid().optional()
   })
 });
@@ -72,7 +72,7 @@ export const updateDelivererStateSchema = z.object({
   })
   });
   
-export const submitCustomerReviewSchema = z.object({
+export const submitCustomerReviewSchema = z.object({ 
   params: z.object({ id: z.string().uuid() }),
   body: z.object({
     restaurantRating: z.number().int().min(1).max(5),

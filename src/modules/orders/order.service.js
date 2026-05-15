@@ -69,7 +69,8 @@ export class OrderService {
     if (!restaurant || !restaurant.isActive) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
     const distanceMeters = calculateDistance(restaurant.lat, restaurant.lng, data.deliveryLat, data.deliveryLng);
-    if (distanceMeters > CAMPUS_CONFIG.MAX_RADIUS_METERS) throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
+    // if (distanceMeters > CAMPUS_CONFIG.MAX_RADIUS_METERS) throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
+    if (distanceMeters < 0) throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
 
     const validItems = await this.orderRepository.fetchActiveMenuItems(data.restaurantId, requestedItemIds);
     if (validItems.length !== requestedItemIds.length) throw new BusinessLogicError(ORDER_ERRORS.INVALID_ITEMS);
@@ -146,6 +147,7 @@ export class OrderService {
     const totalAmount = Number((foodPrice + deliveryFee + serviceFee + tip).toFixed(2));
     const payoutAmount = Number((foodPrice + deliveryFee + tip).toFixed(2));
 
+    console.log("pya is here" , payoutAmount);
 
     const orderPayload = {
       shortId: generateShortId(),
@@ -156,8 +158,11 @@ export class OrderService {
       otpCode: generateOTP()
     };
 
+    console.log("orderpayload is :", orderPayload);
     const newOrder = await this.orderRepository.createOrderWithItems(orderPayload, validatedItemsData);
+    
     timeoutService.scheduleBroadcastTimeout(newOrder.id, userId);
+    this.dispatchService.broadcastNewOrder(newOrder).catch(console.error);
 
     return newOrder;
   }
@@ -223,8 +228,8 @@ export class OrderService {
       'VENDOR_READY_FOR_PICKUP': ['PICKED_UP'],
       'PICKED_UP': ['EN_ROUTE'],
       'EN_ROUTE': ['ARRIVED'],
-      'ARRIVED': ['DELIVERED'],
-      'DELIVERED': ['COMPLETED']
+      'ARRIVED': ['COMPLETED'] 
+      // 'DELIVERED': ['COMPLETED']
     };
 
     const allowedNext = validTransitions[order.status];
@@ -291,6 +296,9 @@ export class OrderService {
   }
 
   async listOrders(userId, userRole, query) {
+
+        const profiles = await this._getActorProfiles(userId);
+
     // 1. Authorization checks based on requested perspective
     if (query.roleAs === 'VENDOR') {
       if (!query.restaurantId) throw new BusinessLogicError("Restaurant ID required.");
@@ -309,106 +317,11 @@ export class OrderService {
       status: query.status,
       roleAs: query.roleAs,
       userId,
+      profileId: query.roleAs === 'CUSTOMER' ? profiles.customerId : profiles.delivererId,
       restaurantId: query.restaurantId
     });
   }
 
-  async checkout(userId, data) {
-    // CRITICAL: Order.customerId is a CustomerProfile.id, NOT a User.id.
-    // We must look up the profile first to get the correct FK.
-    const customerProfile = await prisma.customerProfile.findUnique({
-      where: { userId }
-    });
-    if (!customerProfile) {
-      throw new NotFoundError('Customer profile not found. Please complete your profile setup.');
-    }
-
-    const sanitizedItems = this._aggregateCartItems(data.items);
-    const requestedItemIds = sanitizedItems.map(i => i.menuId);
-
-    // 1. Fetch & Verify Restaurant
-    const restaurant = await this.restaurantRepository.findById(data.restaurantId);
-    if (!restaurant || !restaurant.isActive) {
-      throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
-    }
-
-    const isOpen = isCurrentlyOpen(restaurant.openingTime, restaurant.closingTime);
-    if (!restaurant.isOpen || !isOpen) {
-      throw new BusinessLogicError(ORDER_ERRORS.RESTAURANT_CLOSED);
-    }
-
-    // 2. Geospatial Fencing (1.8km radius)
-    const distanceMeters = calculateDistance(
-      restaurant.lat, restaurant.lng,
-      data.deliveryLat, data.deliveryLng
-    );
-    if (distanceMeters > CAMPUS_CONFIG.MAX_RADIUS_METERS) {
-      throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
-    }
-
-    // 3. Fetch & Verify Menu Items
-    const validItems = await this.orderRepository.fetchActiveMenuItems(data.restaurantId, requestedItemIds);
-
-    if (validItems.length !== requestedItemIds.length) {
-      throw new BusinessLogicError('Some items are no longer available or do not belong to this restaurant.');
-    }
-
-    // 4. Calculate Subtotal (Using Database Prices, ignoring frontend manipulation)
-    let foodPrice = 0;
-    const validatedItemsData = sanitizedItems.map(reqItem => {
-      const dbItem = validItems.find(vi => vi.id === reqItem.menuId);
-      const actualDbPrice = Number(dbItem.price);
-
-      // Prevent Phantom Price Change Attack
-      if (actualDbPrice !== reqItem.expectedUnitPrice) {
-        throw new ConflictError(
-          `Price mismatch on item "${dbItem.name}". The menu price has changed. Please refresh your cart.`
-        );
-      }
-
-      const itemSubtotal = actualDbPrice * reqItem.quantity;
-      foodPrice += itemSubtotal;
-      return {
-        menuId: reqItem.menuId,
-        quantity: reqItem.quantity,
-        unitPrice: actualDbPrice
-      };
-    });
-
-    if (foodPrice < Number(restaurant.minOrderValue)) {
-      throw new BusinessLogicError(`Minimum order value is ${restaurant.minOrderValue} ETB.`);
-    }
-
-    // 5. Calculate Financials
-    const deliveryFee = calculateDeliveryFee(distanceMeters);
-    const serviceFee = calculateServiceFee(foodPrice);
-    const tip = data.tip;
-
-    const totalAmount = Number((foodPrice + deliveryFee + serviceFee + tip).toFixed(2));
-
-    // 6. Assemble Order Payload
-    // customerId = CustomerProfile.id (the correct FK for Order.customerId)
-    const orderPayload = {
-      shortId: generateShortId(),
-      customerId: customerProfile.id,
-      restaurantId: data.restaurantId,
-      foodPrice,
-      deliveryFee,
-      serviceFee,
-      tip,
-      totalAmount,
-      otpCode: generateOTP() // Handshake code for final delivery verification
-    };
-
-    // 7. Persist Transactionally
-    // Pass userId (User.id) separately so the statusHistory FK is correctly set
-    const newOrder = await this.orderRepository.createOrderWithItems(orderPayload, validatedItemsData, userId);
-
-    timeoutService.scheduleBroadcastTimeout(newOrder.id, userId);
-    this.dispatchService.broadcastNewOrder(newOrder).catch(console.error);
-
-    return newOrder;
-  }
 
   async getOrderDetails(userId, userRole, orderId) {
     const order = await this.orderRepository.findById(orderId);
@@ -417,11 +330,12 @@ export class OrderService {
     // Strict IDOR Protection: You can only view an order if you are involved in it
      const profiles = await this._getActorProfiles(userId);
 
+
     if (userRole === 'CUSTOMER' && order.customerId !== profiles.customerId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
     // CRITICAL FIX: Compare against delivererProfile.id
-    if (userRole === 'DELIVERER' && order.delivererId !== profiles.delivererId) {
+    if (order.status === 'ASSIGNED' && userRole === 'DELIVERER' && order.delivererId !== profiles.delivererId) {
       throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
     }
     if (userRole === 'VENDOR_STAFF') {
@@ -470,7 +384,10 @@ export class OrderService {
       // 2. Immediate Escrow Reversal
       if (order.paymentStatus === 'CAPTURED') {
 
-        fraudService.checkRefundAbuse(order.customerId).catch(console.error);
+                const rootCustomerId = order.customer.userId;
+
+
+        fraudService.checkRefundAbuse(rootCustomerId).catch(console.error);
 
         // Mark payment as refunded in the DB
         await prisma.order.update({
@@ -480,7 +397,7 @@ export class OrderService {
 
         // Trigger Ledger
         await this.ledgerService.processFinancialEvent(
-          order, 'REFUND', order.totalAmount, order.customerId
+          order, 'REFUND', order.totalAmount, rootCustomerId
         );
 
         import('../../infrastructure/payment/chapa.adapter.js').then(({ ChapaAdapter }) => {
@@ -571,25 +488,20 @@ export class OrderService {
     await this._verifyTransitionRules(order, status, ['DELIVERER', 'ADMIN'], userRole, userId, profiles);
 
     try {
-      // If Deliverer marks DELIVERED, and Customer already marked RECEIVED, finalize immediately.
-      if (status === 'DELIVERED' && order.status === 'RECEIVED') {
-         await this.orderRepository.finalizeOrderAndTriggerPayout(
-          orderId, 'RECEIVED', userId, this.payoutService
-        );
 
-      if (status === 'PICKED_UP') {
-      fraudService.checkGPSMismatch(orderId, currentLat, currentLng).catch(console.error);
-    }
-
-        this._emitOrderUpdate(orderId, 'COMPLETED', `Order fully complete. Escrow released.`);
-
-        return;
-      }
-
-      // Otherwise, just do a normal state transition
       await this.orderRepository.transitionOrderStatus(orderId, order.status, status, userId);
       this._emitOrderUpdate(orderId, status, `Deliverer updated status to: ${status}`);
 
+
+      // If Deliverer marks DELIVERED, and Customer already marked RECEIVED, finalize immediately.
+      // if (status === 'DELIVERED' && order.status === 'RECEIVED') {
+      //    await this.orderRepository.finalizeOrderAndTriggerPayout(
+      //     orderId, 'RECEIVED', userId, this.payoutService
+      //   );
+
+      // if (status === 'PICKED_UP') {
+      // fraudService.checkGPSMismatch(orderId, currentLat, currentLng).catch(console.error);
+      // }
     } catch (error) {
       if (error.message === 'STATE_CONFLICT') {
         throw new ConflictError("Order state was modified by another request. Please refresh.");
@@ -618,12 +530,15 @@ export class OrderService {
     }
 
     try {
+
       await this.orderRepository.executeCryptographicHandshake(
-        orderId, order.status, userId,delivererId, this.payoutService
+        orderId, order.status, userId,delivererId,order.customer.userId, this.payoutService
       );
 
       this._emitOrderUpdate(orderId, 'COMPLETED', `Delivery confirmed. Escrow released.`);
-    } catch (error) {
+    }
+    catch (error) {
+      console.error("Error during OTP completion:", error);
       if (error.message === 'STATE_CONFLICT') {
         throw new ConflictError("Order state changed concurrently. Please check order status.");
       }
@@ -733,7 +648,11 @@ export class OrderService {
       throw new ForbiddenError("Only deliverers have active deliveries.");
     }
 
-    const activeOrder = await this.orderRepository.findActiveDelivery(userId);
+    const profiles = await this._getActorProfiles(userId);
+    if (!profiles.delivererId) return null;
+
+  
+    const activeOrder = await this.orderRepository.findActiveDelivery(profiles.delivererId);
     
     if (!activeOrder) return null; // No active delivery is a valid state (200 OK, null data)
 
@@ -866,64 +785,24 @@ export class OrderService {
     await this.payoutService.executeDelivererPayout(order);
   }
 
-  //  async calculateQuote(data) {
-  //   const sanitizedItems = this._aggregateCartItems(data.items);
-  //   const requestedItemIds = sanitizedItems.map(i => i.menuId);
-
-  //   const restaurant = await this.restaurantRepository.findById(data.restaurantId);
-  //   if (!restaurant || !restaurant.isActive) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
-
-  //   const distanceMeters = calculateDistance(restaurant.lat, restaurant.lng, data.deliveryLat, data.deliveryLng);
-  //   if (distanceMeters > CAMPUS_CONFIG.MAX_RADIUS_METERS) throw new BusinessLogicError(ORDER_ERRORS.OUT_OF_BOUNDS);
-
-  //   const validItems = await this.orderRepository.fetchActiveMenuItems(data.restaurantId, requestedItemIds);
-  //   if (validItems.length !== requestedItemIds.length) throw new BusinessLogicError(ORDER_ERRORS.INVALID_ITEMS);
-
-  //   let foodPrice = 0;
-  //   sanitizedItems.forEach(reqItem => {
-  //     const dbItem = validItems.find(vi => vi.id === reqItem.menuId);
-  //     if (Number(dbItem.price) !== reqItem.expectedUnitPrice) {
-  //       throw new ConflictError(`Price mismatch on item "${dbItem.name}".`);
-  //     }
-  //     foodPrice += Number(dbItem.price) * reqItem.quantity;
-  //   });
-
-  //   if (foodPrice < Number(restaurant.minOrderValue)) {
-  //     throw new BusinessLogicError(`Minimum order is ${restaurant.minOrderValue} ETB.`);
-  //   }
-
-  //   const deliveryFee = calculateDeliveryFee(distanceMeters);
-  //   const serviceFee = calculateServiceFee(foodPrice);
-  //   const tip = data.tip || 0;
-    
-  //   return {
-  //     distanceMeters,
-  //     foodPrice,
-  //     deliveryFee,
-  //     serviceFee,
-  //     tip,
-  //     totalAmount: Number((foodPrice + deliveryFee + serviceFee + tip).toFixed(2)),
-  //     payoutAmount: Number((foodPrice + deliveryFee + tip).toFixed(2))
-  //   };
-  // }
-
   /**
    * NEW: Review Submission
    */
-  // async submitReview(customerId, orderId, data) {
-  //   const order = await this.orderRepository.findById(orderId);
-  //   if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
+  async submitReview(customerId, orderId, data) {
+    const order = await this.orderRepository.findById(orderId);
+    if (!order) throw new NotFoundError(ORDER_ERRORS.NOT_FOUND);
 
-  //   if (order.customerId !== customerId) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
-  //   if (order.status !== 'COMPLETED') throw new BusinessLogicError("Can only review completed orders.");
+    if (order.customerId !== customerId) throw new ForbiddenError(ORDER_ERRORS.UNAUTHORIZED_ACCESS);
+    if (order.status !== 'COMPLETED') throw new BusinessLogicError("Can only review completed orders.");
 
-  //   // Ensure they haven't already reviewed it
-  //   const existingReview = await prisma.review.findUnique({ where: { orderId } });
-  //   if (existingReview) throw new ConflictError("Order has already been reviewed.");
+    // Ensure they haven't already reviewed it
+    const existingReview = await prisma.review.findUnique({ where: { orderId } });
+    if (existingReview) throw new ConflictError("Order has already been reviewed.");
 
-  //   return await this.orderRepository.createReviewAndUpdateRatings(
-  //     orderId, customerId, order.restaurantId, order.assignedDelivererId, data
-  //   );
-  // }
+    return await this.orderRepository.createReviewAndUpdateRatings(
+      orderId, customerId, order.restaurantId, order.assignedDelivererId, data
+    );
+  }
 
 }
+

@@ -1,18 +1,13 @@
 import prisma from '../../infrastructure/database/prisma.client.js';
 
 export class DispatchRepository {
-  /**
-   * Atomic lock on Order assignment
-   */
+  
   async lockAndAssignOrder(orderId, delivererId) {
     return await prisma.$transaction(async (tx) => {
       // 1. Lock the order row (SELECT FOR UPDATE)
-       const [order] = await tx.$queryRaw`
-        SELECT id, status, "delivererId" 
-        FROM "Order" 
+       const [order] = await tx.$queryRaw`SELECT id, status, "delivererId"  FROM "Order" 
         WHERE id = ${orderId}::uuid 
-        FOR UPDATE;
-      `;
+        FOR UPDATE; `;
 
       if (!order) throw new Error("Order does not exist.");
 
@@ -30,13 +25,8 @@ export class DispatchRepository {
         }
       });
     });
-  }
-
-  /**
-   * Find available deliverers within a coordinate box (BBox) 
-   * A 1.8km radius is approx +/- 0.016 degrees of lat/lng
-   */
-   async findNearbyDeliverers(restaurantLat, restaurantLng) {
+    }
+  async findNearbyDeliverers(restaurantLat, restaurantLng) {
     // 1. Define Bounding Box (approx 1.8km = ~0.016 degrees)
     const minLat = restaurantLat - 0.016;
     const maxLat = restaurantLat + 0.016;
@@ -56,8 +46,7 @@ export class DispatchRepository {
         // Ensure they are NOT currently handling an active order
         // This prevents a deliverer from hoarding multiple orders and ruining the SLA
         NOT: {
-          user: {
-            ordersAsDeliverer: {
+            deliveries:{
               some: {
                 status: {
                   in: [
@@ -66,16 +55,14 @@ export class DispatchRepository {
                     'PICKED_UP', 'EN_ROUTE', 'ARRIVED'
                   ]
                 }
-              }
             }
           }
         },
-        // Bounding Box filter (Assuming we add lat/lng to DelivererProfile for live tracking)
-        // lat: { gte: minLat, lte: maxLat },
-        // lng: { gte: minLng, lte: maxLng }
       },
       select: {
+        id: true,
         userId: true,
+        totalDeliveries: true,
         // lat: true,
         // lng: true,
         rating: true

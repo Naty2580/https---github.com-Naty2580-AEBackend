@@ -13,7 +13,8 @@ export class LedgerRepository {
         amount: data.amount,
         type: data.type, // ESCROW_RESERVE, REIMBURSEMENT_PAYMENT, etc.
         status: 'COMPLETED',
-        reference: data.reference || null
+        reference: data.reference || null, 
+        transferRef: data.reference
       }
     });
   }
