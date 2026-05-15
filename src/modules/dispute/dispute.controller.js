@@ -1,14 +1,26 @@
-import { DisputeRepository } from './dispute.repository.js';
-const repository = new DisputeRepository();
+import { DisputeService } from './dispute.service.js';
+
+const disputeService = new DisputeService();
 
 export const listDisputes = async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
-
-    const result = await repository.findAll({ skip, take: limit, status: req.query.status });
+    const result = await disputeService.listDisputes(req.query);
     res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resolveDispute = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const adminId = req.user.id;
+    await disputeService.resolveDispute(id, adminId, req.body);
+    
+    res.status(200).json({
+      success: true,
+      message: "Dispute resolved successfully."
+    });
   } catch (error) {
     next(error);
   }

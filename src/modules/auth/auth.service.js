@@ -122,22 +122,22 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedError(AUTH_ERRORS.INVALID_CREDENTIALS);
     }
-
     if (user.lockedUntil && new Date() < user.lockedUntil) {
       const remainingMinutes = Math.ceil((user.lockedUntil - new Date()) / 60000);
       throw new ForbiddenError(`Account locked due to multiple failed attempts. Try again in ${remainingMinutes} minutes.`);
     }
-
+    
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       await this.authRepository.incrementFailedLogin(user.id, user.failedLoginAttempts);
       throw new UnauthorizedError(AUTH_ERRORS.INVALID_CREDENTIALS);
     }
-
+    // console.log('Sent token !!!!!!!!!!!!!!!!');
+    
     if (user.failedLoginAttempts > 0 || user.lockedUntil) {
       await this.authRepository.resetLoginAttempts(user.id);
     }
-
+    
 
     if (user.status !== 'ACTIVE') {
       throw new BusinessLogicError(AUTH_ERRORS.USER_BANNED);

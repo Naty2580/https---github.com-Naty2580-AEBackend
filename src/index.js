@@ -8,6 +8,7 @@ import config from './config/env.config.js';
 import prisma from './infrastructure/database/prisma.client.js';
 import { timeoutService } from './modules/orders/timeout.service.js';
 import { socketManager } from './infrastructure/websockets/socket.manager.js';
+import { ConfigService } from './modules/config/config.service.js';
 
 // Create native HTTP server wrapping the Express app
 const server = createServer(app);
@@ -20,6 +21,11 @@ const startServer = async () => {
     // Ensure Database Connection is viable before accepting traffic
     await prisma.$connect();
     console.log('✅ Database connection established successfully.');
+
+    // Warm the in-memory config cache before accepting any traffic
+    const configService = new ConfigService();
+    await configService.warmCache();
+
     timeoutService.sweepOrphanedOrders().catch(console.error);
 
     server.listen(config.PORT, () => {

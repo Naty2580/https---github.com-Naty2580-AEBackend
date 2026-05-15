@@ -10,9 +10,11 @@ import { protect } from '../api/middlewares/auth.middleware.js';
 import orderRoutes from '../modules/orders/order.routes.js';
 import dispatchRoutes from '../modules/dispatch/dispatch.routes.js';
 import paymentRoutes from '../modules/payments/payment.routes.js';
-import ledgerRoutes from '../modules/ledger/ledger.route.js';
+import ledgerRoutes from '../modules/ledger/ledger.routes.js';
 import notificationRoutes from '../modules/notification/notification.routes.js';
 import fraudRoutes from '../modules/fraud/fraud.routes.js';
+import disputeRoutes from '../modules/dispute/dispute.routes.js';
+import configRoutes from '../modules/config/config.routes.js';
 
 
 const router = express.Router();
@@ -36,6 +38,8 @@ router.use('/dispatch', dispatchRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/ledger', ledgerRoutes);
 router.use('/fraud', fraudRoutes);
+router.use('/disputes', disputeRoutes);
+router.use('/config', configRoutes);
 
 router.use('/notifications', notificationRoutes); 
 

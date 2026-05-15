@@ -41,16 +41,16 @@ export class ChapaAdapter {
     return hash === signature;
   }
 
-  static async issueRefund(chapaRef, amount) {
+  static async issueRefund(chapaRef, amount, reason = "Dispute Resolution") {
     try {
-      // Chapa's refund API requires the original transaction reference
-      // and a unique reference for the refund itself.
+      const reference = `REFUND-${crypto.randomBytes(6).toString('hex')}`;
       const payload = {
-        transaction_id: chapaRef, // Note: Depending on Chapa API version, this might need the internal Chapa ID instead of tx_ref. Assuming tx_ref for now.
-        amount: amount.toString()
+        amount: amount.toString(),
+        reason: reason,
+        reference: reference
       };
 
-      const response = await chapaApi.post('/refunds', payload);
+      const response = await chapaApi.post(`/refund/${chapaRef}`, payload);
       return response.data;
     } catch (error) {
       console.error('[CHAPA REFUND ERROR]:', error.response?.data || error.message);

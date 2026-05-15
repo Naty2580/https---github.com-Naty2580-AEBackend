@@ -33,4 +33,11 @@ export class DisputeRepository {
 
     return { total, disputes };
   }
+
+  async update(id, data) {
+    return await prisma.dispute.update({
+      where: { id },
+      data
+    });
+  }
 }

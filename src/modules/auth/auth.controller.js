@@ -53,6 +53,7 @@ export const login = async (req, res, next) => {
   try {
     const { identifier, password } = req.body;
     const { accessToken, refreshToken, user } = await authService.login(identifier, password);
+    
 
     res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS);
 
@@ -60,6 +61,7 @@ export const login = async (req, res, next) => {
       success: true,
       data: { accessToken, user }
     });
+    
   } catch (error) {
     next(error);
   }

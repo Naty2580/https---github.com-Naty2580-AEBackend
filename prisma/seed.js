@@ -87,7 +87,11 @@ async function main() {
     'RefreshToken', 'UserAuditLog', 'User'
   ];
   for (const table of tableNames) {
-    await prisma.$executeRawUnsafe(`TRUNCATE TABLE "${table}" CASCADE;`);
+    try {
+      await prisma.$executeRawUnsafe(`TRUNCATE TABLE "${table}" CASCADE;`);
+    } catch (e) {
+      console.log(`⚠️ Skipping table "${table}" (Might not exist)`);
+    }
   }
 
   // 2. CONFIG & ADMIN
@@ -190,19 +194,19 @@ async function main() {
     bookmarks.push({ id: crypto.randomUUID(), userId: cId, type: 'RESTAURANT', targetId: restaurantIds[0] });
     bookmarks.push({ id: crypto.randomUUID(), userId: cId, type: 'MENU_ITEM', targetId: menuItems[0].id });
   });
-  await prisma.bookmark.createMany({ data: bookmarks });
+  // await prisma.bookmark.createMany({ data: bookmarks });
 
   let tickets = [];
   tickets.push({ id: crypto.randomUUID(), userId: customerIds[0], subject: 'App Crashing', description: 'Map fails to load', status: 'OPEN' });
   tickets.push({ id: crypto.randomUUID(), userId: delivererIds[0], subject: 'Payout Missing', description: 'Did not get money for last order', status: 'RESOLVED', resolution: 'Bank delay, fixed.' });
   tickets.push({ id: crypto.randomUUID(), userId: vendorIds[0], subject: 'Change Name', description: 'Please change my restaurant name', status: 'IN_PROGRESS' });
-  await prisma.supportTicket.createMany({ data: tickets });
+  // await prisma.supportTicket.createMany({ data: tickets });
 
-  let notifications = [];
-  customerIds.slice(0, 3).forEach(cId => {
-    notifications.push({ id: crypto.randomUUID(), userId: cId, title: 'Promo!', message: 'Free delivery today!', type: 'PROMO' });
-  });
-  await prisma.notification.createMany({ data: notifications });
+  // let notifications = [];
+  // customerIds.slice(0, 3).forEach(cId => {
+  //   notifications.push({ id: crypto.randomUUID(), userId: cId, title: 'Promo!', message: 'Free delivery today!', type: 'PROMO' });
+  // });
+  // await prisma.notification.createMany({ data: notifications });
 
   // Seed Orders
   for (let i = 0; i < 3; i++) {
@@ -242,14 +246,14 @@ async function main() {
         { id: crypto.randomUUID(), orderId, amount: 16, type: 'PLATFORM_REVENUE', status: 'COMPLETED' }
       ]});
       await prisma.payoutLog.create({ data: { id: crypto.randomUUID(), orderId, status: 'SUCCESS', apiResponse: 'Telebirr OK' } });
-      await prisma.dispatchLog.create({ data: { id: crypto.randomUUID(), orderId, delivererId: dUserId, action: 'ACCEPTED' }});
-      await prisma.review.create({ data: { id: crypto.randomUUID(), orderId, restaurantRating: 5, delivererRating: 5, customerComment: 'Fast!', customerRating: 5, delivererComment: 'Good' }});
-      await prisma.rating.create({ data: { id: crypto.randomUUID(), raterId: cUserId, rateeId: dUserId, orderId, rating: 5, comment: 'Nice' }});
+      // await prisma.dispatchLog.create({ data: { id: crypto.randomUUID(), orderId, delivererId: dUserId, action: 'ACCEPTED' }});
+      // await prisma.review.create({ data: { id: crypto.randomUUID(), orderId, restaurantRating: 5, delivererRating: 5, customerComment: 'Fast!', customerRating: 5, delivererComment: 'Good' }});
+      // await prisma.rating.create({ data: { id: crypto.randomUUID(), raterId: cUserId, rateeId: dUserId, orderId, rating: 5, comment: 'Nice' }});
     }
 
     if (currentStatus === 'DISPUTED') {
       await prisma.dispute.create({ data: { id: crypto.randomUUID(), orderId, raisedById: cUserId, reason: 'Food never arrived', status: 'OPEN' }});
-      await prisma.anomalyFlag.create({ data: { id: crypto.randomUUID(), orderId, userId: dUserId, reason: 'GPS_MISMATCH', severity: 'HIGH' }});
+      // await prisma.anomalyFlag.create({ data: { id: crypto.randomUUID(), orderId, userId: dUserId, reason: 'GPS_MISMATCH', severity: 'HIGH' }});
     }
   }
 

@@ -9,6 +9,7 @@ import { timeoutService } from "../modules/orders/timeout.service.js"
 import v1Routes from './routes.v1.js';
 import { globalErrorHandler } from './middlewares/error.middleware.js';
 import { NotFoundError } from '../core/errors/domain.errors.js';
+import { maintenanceModeMiddleware } from './middlewares/maintenance.middleware.js';
 
 BigInt.prototype.toJSON = function() {
   return this.toString();
@@ -59,7 +60,10 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   explorer: true,
   customSiteTitle: 'ASTU Eats API Docs'
 }));
-// 2. API Routing
+// 2. Maintenance Mode Gate (checked before any API route)
+app.use('/api/v1', maintenanceModeMiddleware);
+
+// 3. API Routing
 app.use('/api/v1', v1Routes);
 
 

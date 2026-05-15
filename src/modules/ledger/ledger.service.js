@@ -1,4 +1,5 @@
 import { LedgerRepository } from './ledger.repository.js';
+import prisma from '../../infrastructure/database/prisma.client.js';
 
 export class LedgerService {
   constructor() {
@@ -48,9 +49,67 @@ export class LedgerService {
   }
 
   async getPlatformLedger(query) {
-    // Similar to above, but querying PLATFORM_REVENUE where userId = null
-    // Implementation omitted for brevity, follows same pattern
-    return { platformRevenue: 0, entries: [] }; 
+    const page = parseInt(query.page) || 1;
+    const limit = parseInt(query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    const [total, transactions, aggregations, pendingPayouts] = await prisma.$transaction([
+      // 1. Total count for pagination
+      prisma.ledgerEntry.count(),
+      
+      // 2. Fetch actual transactions
+      prisma.ledgerEntry.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          order: {
+            select: { shortId: true, status: true }
+          },
+          user: {
+            select: { fullName: true, role: true }
+          }
+        }
+      }),
+      
+      // 3. Aggregate COMPLETED amounts by type
+      prisma.ledgerEntry.groupBy({
+        by: ['type'],
+        _sum: { amount: true },
+        where: { status: 'COMPLETED' }
+      }),
+      
+      // 4. Aggregate PENDING Reimbursements
+      prisma.ledgerEntry.aggregate({
+        _sum: { amount: true },
+        where: { type: 'REIMBURSEMENT_PAYMENT', status: 'PENDING' }
+      })
+    ]);
+
+    const summary = {
+      totalEscrow: 0,
+      platformRevenue: 0,
+      pendingPayouts: Number(pendingPayouts._sum.amount || 0),
+      totalRefunds: 0
+    };
+
+    aggregations.forEach(agg => {
+      const amount = Number(agg._sum.amount || 0);
+      if (agg.type === 'ESCROW_RESERVE') summary.totalEscrow += amount;
+      if (agg.type === 'PLATFORM_REVENUE') summary.platformRevenue += amount;
+      if (agg.type === 'REFUND') summary.totalRefunds += amount;
+    });
+
+    const formattedTransactions = transactions.map(t => ({
+      ...t,
+      amount: Number(t.amount || 0)
+    }));
+
+    return { 
+      total, 
+      summary, 
+      transactions: formattedTransactions 
+    };
   }
   
 }
