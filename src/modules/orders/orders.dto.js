@@ -17,8 +17,8 @@ export const createOrderSchema = z.object({
 export const checkoutSchema = z.object({
   body: z.object({
     restaurantId: z.uuid("Invalid restaurant ID"),
-    deliveryLat: z.number().min(-90).max(90, "Valid delivery latitude required").optional(),
-    deliveryLng: z.number().min(-180).max(180, "Valid delivery longitude required").optional(),
+    deliveryLat: z.number().min(-90).max(90, "Valid delivery latitude required").nullable().optional(),
+    deliveryLng: z.number().min(-180).max(180, "Valid delivery longitude required").nullable().optional(),
     items: z.array(
       z.object({
         menuId: z.uuid("Invalid menu item ID"),
