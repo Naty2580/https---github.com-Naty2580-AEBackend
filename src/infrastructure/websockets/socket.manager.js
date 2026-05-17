@@ -15,7 +15,7 @@ class SocketManager {
   initialize(httpServer) {
     this.io = new Server(httpServer, {
       cors: {
-        origin: config.FRONTEND_URL || 'http://localhost:3000',
+        origin: [config.FRONTEND_URL || 'http://localhost:3000', 'http://localhost:5174'],
         methods: ['GET', 'POST'],
         credentials: true
       },

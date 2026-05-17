@@ -25,6 +25,7 @@ app.use(helmet()); // Secure HTTP headers
 const allowedOrigins = [
   'http://localhost:3000', // React/Next.js default
   'http://localhost:5173', // Vite default
+  'http://localhost:5174', // Vite alternate
   'http://127.0.0.1:5173', // Vite alternate
   'http://127.0.0.1:5174', // Vite alternate
   process.env.FRONTEND_URL  // Production URL

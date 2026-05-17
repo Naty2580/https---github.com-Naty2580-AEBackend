@@ -37,21 +37,35 @@ export class LedgerService {
     const limit = parseInt(query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const [total, entries, aggregations] = await prisma.$transaction([
+    const [total, entries, earningEntries] = await prisma.$transaction([
       prisma.ledgerEntry.count({ where: { userId, type: 'REIMBURSEMENT_PAYMENT', status: 'COMPLETED' } }),
       prisma.ledgerEntry.findMany({
         where: { userId, type: 'REIMBURSEMENT_PAYMENT', status: 'COMPLETED' },
         orderBy: { createdAt: 'desc' },
         skip, take: limit
       }),
-      prisma.ledgerEntry.aggregate({
+      // prisma.ledgerEntry.aggregate({
+      //   where: { userId, type: 'REIMBURSEMENT_PAYMENT', status: 'COMPLETED' },
+      //   _sum: { amount: true }
+      // })
+      prisma.ledgerEntry.findMany({
         where: { userId, type: 'REIMBURSEMENT_PAYMENT', status: 'COMPLETED' },
-        _sum: { amount: true }
+        select: {
+          order: {
+            select: {
+              deliveryFee: true
+            }
+          }
+        }
       })
     ]);
 
+    const totalEarnings = earningEntries.reduce((sum, entry) => {
+    return sum + Number(entry.order?.deliveryFee || 0);
+  }, 0);
+
     return { 
-      totalEarnings: aggregations._sum.amount || 0,
+      totalEarnings,
       total, 
       entries 
     };
