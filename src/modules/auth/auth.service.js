@@ -75,6 +75,7 @@ export class AuthService {
           email: data.email,
           password: hashedPassword,
           role: 'VENDOR_STAFF',
+          status: 'PENDING',
           activeMode: 'CUSTOMER',
           isEmailVerified: true, 
           isPhoneVerified: false

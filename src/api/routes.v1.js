@@ -15,6 +15,8 @@ import notificationRoutes from '../modules/notification/notification.routes.js';
 import fraudRoutes from '../modules/fraud/fraud.routes.js';
 import disputeRoutes from '../modules/dispute/dispute.routes.js';
 import configRoutes from '../modules/config/config.routes.js';
+import analyticsRoutes from '../modules/analytics/analytics.routes.js';
+
 
 
 const router = express.Router();
@@ -40,7 +42,7 @@ router.use('/ledger', ledgerRoutes);
 router.use('/fraud', fraudRoutes);
 router.use('/disputes', disputeRoutes);
 router.use('/config', configRoutes);
-
+router.use('/analytics', analyticsRoutes);
 router.use('/notifications', notificationRoutes); 
 
 // Global menu search endpoint (no restaurantId in path)

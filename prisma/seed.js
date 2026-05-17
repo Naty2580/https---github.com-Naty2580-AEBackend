@@ -138,7 +138,22 @@ async function main() {
     users.push({ id, telegramId: generateTelegramId(), astuEmail: `student${i+1}@astu.edu.et`, fullName: `ASTU Student ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'CUSTOMER', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true });
   }); 
 
+  // --- PENDING APPLICANTS FOR ADMIN DASHBOARD ---
+  const pendingVendorIds = Array.from({ length: 5 }, () => crypto.randomUUID());
+  pendingVendorIds.forEach((id, i) => {
+    users.push({ id, telegramId: generateTelegramId(), email: `pendingvendor${i+1}@gmail.com`, fullName: `Pending Vendor ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'VENDOR_STAFF', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true });
+  });
+
+  const pendingDelivererIds = Array.from({ length: 5 }, () => crypto.randomUUID());
+  pendingDelivererIds.forEach((id, i) => {
+    users.push({ id, telegramId: generateTelegramId(), astuEmail: `pendingdeliverer${i+1}@astu.edu.et`, fullName: `Pending Deliverer ${i+1}`, phoneNumber: generatePhone(), password: hashedPassword, role: 'DELIVERER', activeMode: 'DELIVERER', status: 'ACTIVE', isEmailVerified: true, isPhoneVerified: true });
+    
+    delivererProfiles.push({ id: crypto.randomUUID(), userId: id, payoutProvider: 'TELEBIRR', payoutAccount: `09${Math.floor(10000000 + Math.random() * 90000000)}`, verificationStatus: 'PENDING', isVerified: false, isAvailable: false, isOnline: false, totalDeliveries: 0, rating: 0 });
+  });
+  // ----------------------------------------------
+
   await prisma.user.createMany({ data: users });
+
 
   // CRITICAL FIX: Explicitly generate ID for CustomerProfile for ALL users
   users = [{id: adminId}, ...users];
@@ -165,6 +180,11 @@ async function main() {
     });
 
     vendorProfiles.push({ id: crypto.randomUUID(), userId: vendorIds[i], restaurantId: restId, isOwner: true, businessDocumentUrl: 'https://example.com/doc.pdf', verificationStatus: 'APPROVED' });
+
+    // Attach pending vendors to some random restaurants as unapproved staff
+    if (i < 5) {
+      vendorProfiles.push({ id: crypto.randomUUID(), userId: pendingVendorIds[i], restaurantId: restId, isOwner: false, businessDocumentUrl: 'https://example.com/pending_doc.pdf', verificationStatus: 'PENDING' });
+    }
 
     MENU_CATEGORIES.forEach((cat, catIdx) => {
       const catId = crypto.randomUUID();
